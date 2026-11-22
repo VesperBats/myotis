@@ -57,6 +57,9 @@ its trust anchors and release checks.
   moved to 2026-11-22 (mainnet slot 15,707,840), in all three engines; the
   checkpoint table extends to block 26,467,996, cross-checked against a
   second node. The mainnet bootnodes still equal go-ethereum's.
+- The RAILGUN PoC and Bee PoC demo installers are no longer built or
+  released, and their log-index seeds no longer refreshed: nobody uses them.
+  They come back with the general log index on Swarm.
 - `StatusSnapshot` (`:myotis-api`) has a new last component,
   `checkpointAlarm`: a consumer that constructs it passes one more argument
   (#908).

@@ -9,7 +9,7 @@ When the user asks for a release (a `v*` tag, a version bump, "cut a release"),
 **ask these three questions first and act only on what they choose** (owner
 rulings, 2026-09-02 and 2026-09-11), then **move the version pins — step 4
 below, mandatory, never asked about** (owner ruling, 2026-09-24) — and
-**refresh the PoC seeds, step 5, mandatory too** (2026-10-13) — and **add the
+**refresh the PoC seeds, step 5** — suspended, see the step (owner's decision, 2026-11-22) — and **add the
 release to `CHANGELOG.md`, step 7, mandatory as well** (owner's request,
 2026-11-15) — and **extend the checkpoint tables, step 6, mandatory too**
 (owner's decision D1, 2026-11-20). Everything a release needs goes into ONE release PR. **The tag is the owner's action**: after
@@ -188,7 +188,16 @@ question does not rest on memory.
    strings advertise the previous release. The macOS dmg version is derived
    (major + 1) and needs no edit.
 
-5. **Refresh the PoC log-index seeds. MANDATORY — not a question, and part of
+5. **SUSPENDED (owner's decision, 2026-11-22):** the PoC log-index seeds are
+   no longer refreshed, and the two bundles that ship them (the RAILGUN PoC
+   dmg, `railgun-dmg.yml`, and the Bee PoC leg of `desktop-dmg.yml`) are
+   switched off, as is the `PoC seeds` check (`poc-seeds.yml`). "Nobody is using
+   either bee seed or railgun seed at the moment … It will come back with the
+   general log index either parallel or integrated in the addr1 data on
+   swarm." Until then a release skips this step. The text below is the step as
+   it stood, for when the bundles come back.
+
+   5. **Refresh the PoC log-index seeds. MANDATORY — not a question, and part of
    the SAME release PR** (owner's request, 2026-10-13). Each seed is usable for
    500,000 blocks above its top (`MAX_GAP`): ~29 days on Gnosis, ~69 on mainnet
    and Sepolia. A release built on an older one ships a PoC that starts far
@@ -319,6 +328,11 @@ last release. docs/guides/reproducible-builds.md is the page for someone
 checking a release.
 
 ## Demo bundles build on merge to `main`, never on PRs
+
+**Switched off for now (owner's decision, 2026-11-22):** the RAILGUN PoC dmg
+and the Bee PoC dmg are not built, on `main` or on a tag, until the general log
+index comes back on Swarm (step 5 above). The rule below stands for any bundle
+that builds.
 
 The demo / PoC installers — the RAILGUN PoC dmg (`railgun-dmg.yml`), the Bee
 PoC dmg (the `bee-poc` leg of `desktop-dmg.yml`) and any bundle added later —

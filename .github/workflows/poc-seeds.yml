@@ -18,15 +18,11 @@
 name: PoC seeds
 
 on:
-  # Unscoped base, like the other PR workflows. For a pull_request, the paths
-  # filter is evaluated against the whole PR diff, so a release PR — which always
-  # changes build.gradle.kts — runs it on every push.
-  pull_request:
-    paths:
-      - "build.gradle.kts"
-      - "data/bee/gnosis/**"
-      - "scripts/refresh_poc_seeds.py"
-      - ".github/workflows/poc-seeds.yml"
+  # SWITCHED OFF (owner's decision, 2026-11-22; .claude/agent/releases.md,
+  # step 5): the PoC seeds are no longer refreshed for a release. Manual only;
+  # restore the pull_request trigger (paths build.gradle.kts, data/bee/gnosis/**,
+  # scripts/refresh_poc_seeds.py, this file) when the bundles come back.
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

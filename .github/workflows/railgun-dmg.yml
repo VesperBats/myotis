@@ -19,13 +19,13 @@ name: RAILGUN PoC DMG (macOS arm64)
 # Intel audience to serve.
 
 on:
-  # Merge: every push to main produces a current artifact, so the demo machine
-  # can always pull the latest build without waiting for a release.
-  push:
-    branches: [ "main" ]
-    tags: [ "v*" ]
-  # Manual, for rebuilding after a seed is refreshed (the shelf life is ~69 days
-  # on either network) without needing a commit.
+  # SWITCHED OFF (owner's decision, 2026-11-22; .claude/agent/releases.md,
+  # step 5): nobody uses the RAILGUN PoC, and its seed is no longer refreshed.
+  # It comes back with the general log index on Swarm. Until then it builds
+  # only on a manual dispatch; restore the push trigger below to bring it back:
+  #   push:
+  #     branches: [ "main" ]
+  #     tags: [ "v*" ]
   workflow_dispatch:
 
 concurrency:

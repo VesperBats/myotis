@@ -195,8 +195,8 @@ Full text: `.claude/agent/reproducibility.md`.
 Read `.claude/agent/releases.md` in full before any release work. In outline:
 **ask three questions first** (1. refresh the trust checkpoints? 2. re-sync the
 mainnet bootnodes? 3. run the cold-start checks?), then the mandatory steps
-(4. move the version pins, 5. refresh the PoC log-index seeds, 6. extend the
-checkpoint tables, 7. turn `[Unreleased]` in `CHANGELOG.md` into the entry of
+(4. move the version pins, 5. *suspended*: the PoC seeds and their bundles are off
+(owner's decision, 2026-11-22), 6. extend the checkpoint tables, 7. turn `[Unreleased]` in `CHANGELOG.md` into the entry of
 the exact tag to come; every `v*` tag gets a PR for it), all in ONE release PR. Ask too whether a
 merge since the last tag is an embargoed security fix: its release PR, notes
 and changelog entry then stay neutral. The tag is the owner's action. After
@@ -228,8 +228,10 @@ mechanics below.
 
 ## Demo bundles build on merge to `main`, never on PRs
 
-The RAILGUN and Bee PoC installers build on pushes to `main` and on `v*` tags,
-not on pull requests. Give a new bundle the same trigger set. Full text:
+The RAILGUN and Bee PoC installers are switched off (owner's decision,
+2026-11-22: nobody uses them; they come back with the general log index on
+Swarm). A bundle builds on pushes to `main` and on `v*` tags, never on pull
+requests; give a new one the same trigger set. Full text:
 `.claude/agent/releases.md`.
 
 ## Platform & language direction
