@@ -18,7 +18,7 @@ hash, and the top. A table that does not match is refused.
 - **Built** 2026-11-20 by eth2swarm's `ethswarm checkpoint-table` (VesperBats/eth2swarm#32)
   from Erigon 3.8.1. The tool hashed every header itself and linked each one by `parentHash`
   down to the genesis hash `0xd4e56740…8fa3`.
-- **Top:** block 26,457,537 (`0x229a7a21…85fc`), the source node's finalized block. It was
+- **Top, as first built:** block 26,457,537 (`0x229a7a21…85fc`), the source node's finalized block. It was
   cross-checked against Geth 1.17.7: 203 entries and the top block were equal. The owner ruled
   on 2026-11-20 that this suffices for the first table. The running node's gap walk, from its
   beacon-attested finalized block down to the top, checks the top again.

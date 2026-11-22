@@ -1014,6 +1014,13 @@ const SEPOLIA_STATIC_PEERS: &[&str] = &[
     // SYNCED in 80 s, and the old-anchor walk from oldest-servable.properties
     // reached SYNCED in 60 s from period 1323 (91 behind). The bootnodes seeded
     // discv5 (23 entries).
+    // Release check for v0.1.21 (2026-11-22), anchor slot 11632064
+    // (refreshed), period 1419: run 44983742266, its re-run and a local run on
+    // the nuc, 1 of 2 — roost served the bootstrap, the period-1419 update and
+    // the current period's; this Nimbus refused every libp2p handshake while its
+    // TCP port answered (its peer count was not read: zbox's REST is not
+    // reachable from the nuc). The dead-pins and old-anchor steps did not run.
+    // The owner waived it for this release (2026-11-22).
     "/ip4/188.68.32.16/tcp/9104/p2p/16Uiu2HAkvYx58piGw1oxz34CUoeTv8nNQwTwE2cZZh4jR4wVMYy6",
 ];
 

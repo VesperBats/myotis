@@ -454,6 +454,11 @@ public record NetworkConfig(
             // Release check for v0.1.21-rc1 (2026-11-15), slot 11583488 (refreshed):
             // run 43701513476, 2 of 2, both cold starts SYNCED; the Nimbus had 48
             // of 60 peers right after. Details in the Rust twin.
+            // Release check for v0.1.21 (2026-11-22), slot 11632064 (refreshed):
+            // run 44983742266 (and its re-run, and a local run on the nuc): roost
+            // served it; this Nimbus refused every libp2p handshake while its TCP
+            // port answered. 1 of 2 — the owner waived it for this release.
+            // Details in the Rust twin.
             // Keep this list identical to SEPOLIA_STATIC_PEERS in
             // rust/myotis-net/src/sync.rs (both parity tests pin it).
             List.of(

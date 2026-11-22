@@ -48,15 +48,16 @@ its trust anchors and release checks.
   Guide: `docs/guides/address-history.md` (#891–#907).
 - API: `StatusSnapshot.checkpointAlarm`; `VerifiedReads` gains the address
   history calls and `MyotisEngine.setAddressHistoryConfigJson`, refusing by
-  default. The engine's ABI is 60 (#906, #908).
+  default (#906, #908).
 
 ### Changed
 
 - Engine ABI 60 (0.1.21-rc1 shipped 59).
 - Trust anchors: the embedded checkpoints of mainnet, Gnosis and Sepolia
-  moved to 2026-11-22 (mainnet slot 15,707,840), in all three engines; the
-  checkpoint table extends to block 26,467,996, cross-checked against a
-  second node. The mainnet bootnodes still equal go-ethereum's.
+  moved to 2026-11-22 (mainnet slot 15,707,840) in the Java and Rust engines,
+  and mainnet's in the Go engine too (it ships mainnet only); the checkpoint
+  table extends to block 26,467,996, cross-checked against a second node. The
+  mainnet bootnodes still equal go-ethereum's.
 - The RAILGUN PoC and Bee PoC demo installers are no longer built or
   released, and their log-index seeds no longer refreshed: nobody uses them.
   They come back with the general log index on Swarm.
@@ -116,7 +117,7 @@ its trust anchors and release checks.
   neither runs a separate per-slot optimistic-update poll (neither
   ever requested, per `docs/how-it-works/verification.md`); polling
   one is a possible future improvement for BOTH engines, not a gap of
-  Go against the twin.
+  Go against the twin (#889).
 
 ### Fixed
 
