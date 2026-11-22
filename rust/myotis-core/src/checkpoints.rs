@@ -150,18 +150,21 @@ impl<'a> CheckpointTable<'a> {
 /// hash; the top is the source node's finalized block, cross-checked against Geth 1.17.7
 /// (203 entries and the top equal). The sidecar `mainnet-1024.hashes.json` records the same.
 pub const MAINNET_PIN: TablePin = TablePin {
-    keccak256: hex32("ccf5ad8849bb513d7aef7b7bc732b264e2874c6b6e24cc4880753ceb68cc03d0"),
-    entries: 25_838,
+    keccak256: hex32("2e243c4026af847fb4c31486cec58b4ca8c53022b899562bbb5c5490d8362778"),
+    entries: 25_848,
     genesis_hash: hex32("d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3"),
-    top_number: 26_457_537,
-    top_hash: hex32("229a7a2185b4a334b8c9e4f94f028974365698f2bc40b7ea418e276da9a485fc"),
+    top_number: 26_467_996,
+    top_hash: hex32("2a207fd0f83ee37e9cf5a6900f89bd71bc8e839237eb24935fd55e40638401f6"),
 };
 
 /// Every mainnet table shipped so far, as `(entries, keccak256 of those entries)`, oldest
 /// first. Moving [`MAINNET_PIN`] appends the new pin here (release step 6): the test
 /// `every_shipped_table_is_a_prefix` then checks that a release only appended.
 pub const MAINNET_SHIPPED: &[(u64, [u8; 32])] =
-    &[(25_838, hex32("ccf5ad8849bb513d7aef7b7bc732b264e2874c6b6e24cc4880753ceb68cc03d0"))];
+    &[
+        (25_838, hex32("ccf5ad8849bb513d7aef7b7bc732b264e2874c6b6e24cc4880753ceb68cc03d0")),
+        (25_848, hex32("2e243c4026af847fb4c31486cec58b4ca8c53022b899562bbb5c5490d8362778")),
+    ];
 
 /// The embedded mainnet table's bytes, as committed.
 pub static MAINNET_BYTES: &[u8] = include_bytes!("../checkpoints/mainnet-1024.hashes");

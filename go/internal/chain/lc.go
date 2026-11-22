@@ -45,11 +45,11 @@ func ConsensusMainnet() *Consensus {
 	return &Consensus{
 		GenesisTime:           1606824023,
 		GenesisValidatorsRoot: common.HexToHash("0x4b363db94e286120d76eb905340fdd4e54bfe9f06bf33ff6cf5ad27f511bfe95"),
-		// @checkpoint:mainnet — slot 15659264 (period 1911), taken
-		// 2026-11-15, the same anchor both other engines ship
+		// @checkpoint:mainnet — slot 15707840 (period 1917), taken
+		// 2026-11-22, the same anchor both other engines ship
 		// (TestCheckpointMatchesRustEngine keeps the three in lockstep).
-		CheckpointRoot: common.HexToHash("0xb843ba0dd7865bbab2582fd9b817afdb50b99c1e69ded355563c6f88143f2421"),
-		CheckpointSlot: 15659264,
+		CheckpointRoot: common.HexToHash("0x4b5bf5f8e8c9a6b33d3859b124482b700cfa96a5eb3a41d66bc1029c07f777e3"),
+		CheckpointSlot: 15707840,
 		// BPO2 (Fusaka) blob schedule entry (EIP-7892), the params folded
 		// into the fork digest from that epoch on — sync.rs:334-336. With
 		// the default (epoch 0) the pre-Fulu digest formula stands.

@@ -19,6 +19,8 @@ its trust anchors and release checks.
 
 ## [Unreleased]
 
+## [0.1.21] - 2026-11-22
+
 ### Added
 
 - Query tab: a block number fetches that block from the EL peers and shows how
@@ -31,7 +33,7 @@ its trust anchors and release checks.
   window with a measured survey of which peers still serve old blocks
   (#882).
 - Rust engine, mainnet: blocks below the 512-block window verify through a
-  bundled checkpoint table, the hash of every 1024th block up to 26,457,537,
+  bundled checkpoint table, the hash of every 1024th block up to 26,467,996,
   pinned by keccak256 (rule D1, a new trust anchor). Above the table's top, a
   block verifies by a walk down from an attested finalized block. Deep bodies
   and receipts come from the peers whose eth/69 `earliestBlock` covers the
@@ -50,6 +52,11 @@ its trust anchors and release checks.
 
 ### Changed
 
+- Engine ABI 60 (0.1.21-rc1 shipped 59).
+- Trust anchors: the embedded checkpoints of mainnet, Gnosis and Sepolia
+  moved to 2026-11-22 (mainnet slot 15,707,840), in all three engines; the
+  checkpoint table extends to block 26,467,996, cross-checked against a
+  second node. The mainnet bootnodes still equal go-ethereum's.
 - `StatusSnapshot` (`:myotis-api`) has a new last component,
   `checkpointAlarm`: a consumer that constructs it passes one more argument
   (#908).
@@ -661,7 +668,8 @@ MetaMask; ENS with CCIP-Read; mainnet and Gnosis Chain; the Android app, the
 shared Compose Multiplatform UI and the macOS dmg; and `:myotis-api`, the
 engine contract (#1 to #123).
 
-[Unreleased]: https://github.com/biafra23/myotis/compare/v0.1.21-rc1...HEAD
+[Unreleased]: https://github.com/biafra23/myotis/compare/v0.1.21...HEAD
+[0.1.21]: https://github.com/biafra23/myotis/compare/v0.1.21-rc1...v0.1.21
 [0.1.21-rc1]: https://github.com/biafra23/myotis/compare/v0.1.20...v0.1.21-rc1
 [0.1.20]: https://github.com/biafra23/myotis/compare/v0.1.20-rc1...v0.1.20
 [0.1.20-rc1]: https://github.com/biafra23/myotis/compare/v0.1.19...v0.1.20-rc1
