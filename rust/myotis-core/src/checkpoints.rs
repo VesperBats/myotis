@@ -150,9 +150,9 @@ impl<'a> CheckpointTable<'a> {
 /// extended for v0.1.21 (2026-11-22) by `--extend` (eth2swarm `2707995`), which reproduced the
 /// old last entry (block 26,457,088) and linked every header from it through the old top up to
 /// the new one; extended again for v0.1.22 (2026-11-23) the same way, from the old last entry
-/// (block 26,467,328) through the old top (26,467,996). Each top is the source node's finalized block, cross-checked against Geth
-/// 1.17.7 (203 entries and the top equal). The sidecar `mainnet-1024.hashes.json` records the
-/// same, `extended_from` included.
+/// (block 26,467,328) through the old top (26,467,996). Each top is the source node's
+/// finalized block, cross-checked against Geth 1.17.7 (203 entries and the top equal). The
+/// sidecar `mainnet-1024.hashes.json` records the same, `extended_from` included.
 pub const MAINNET_PIN: TablePin = TablePin {
     keccak256: hex32("e6cbcf4709eaf0b6023af03903091a9783e4faac24ef7c62b34b3465e9e8013f"),
     entries: 25_857,
