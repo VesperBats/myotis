@@ -2158,55 +2158,205 @@ fun refreshOneCheckpoint(project: Project, logger: org.gradle.api.logging.Logger
     if (pinnedSlot != null && minSlot != pinnedSlot) {
         throw GradleException("[refresh:$net] resolved slot $minSlot != pinned slot $pinnedSlot")
     }
-    val resolved = probed.mapNotNull { (base, _) ->
-        val body = fetch("$base/eth/v1/beacon/blocks/$minSlot/root")
-        val root = body?.let { rootRe.find(it)?.groupValues?.get(2)?.lowercase() }
-        if (root == null) {
-            logger.warn("[refresh] $base could not resolve the block root at slot $minSlot"); null
-        } else {
-            logger.lifecycle("[refresh] $base → slot=$minSlot root=0x$root")
-            Hdr(base, minSlot, root)
+    // A function of the slot, so phase 3 can cross-validate an earlier epoch's
+    // root exactly the way it validates this one. `mustExist = false` is for
+    // phase 3's walk: a slot no endpoint has a block at (a skipped epoch
+    // boundary) answers null and the walk moves on; disagreement and a single
+    // operator still refuse, as for the first slot.
+    fun crossValidatedRoot(slot: Long, mustExist: Boolean): String? {
+        val resolved = probed.mapNotNull { (base, _) ->
+            val body = fetch("$base/eth/v1/beacon/blocks/$slot/root")
+            val root = body?.let { rootRe.find(it)?.groupValues?.get(2)?.lowercase() }
+            if (root == null) {
+                logger.warn("[refresh] $base could not resolve the block root at slot $slot"); null
+            } else {
+                logger.lifecycle("[refresh] $base → slot=$slot root=0x$root")
+                Hdr(base, slot, root)
+            }
         }
+        if (resolved.isEmpty()) {
+            if (!mustExist) return null
+            throw GradleException("No $net endpoint could resolve the block root at slot $slot")
+        }
+        val distinct = resolved.map { it.root }.toSet()
+        if (distinct.size != 1) {
+            val detail = resolved.joinToString("\n  ") { "${it.base} → 0x${it.root}" }
+            throw GradleException(
+                "Cross-validation FAILED at slot $slot. Endpoints disagreed:\n  $detail\n" +
+                "Aborting; NetworkConfig.java not modified.")
+        }
+        val finalRoot = distinct.single()
+        // REFUSE below two agreeing OPERATORS rather than warn. This writes a TRUST
+        // ROOT, and the per-network tasks this replaces already refused — warning
+        // instead would have quietly weakened mainnet and sepolia while claiming to
+        // unify them. Agreement is counted per registrable domain, not per URL:
+        // two hostnames of the same operator (gnosis-beacon-api.publicnode.com and
+        // gnosis-beacon.publicnode.com, say) are one voice, not two — otherwise a
+        // single operator could satisfy the gate alone. -PallowSingleSource is the
+        // named escape hatch for a chain whose providers really are unavailable, so
+        // the weaker guarantee is always an explicit choice made on the command line.
+        val operators = resolved.map { hdr ->
+            URI(hdr.base).host.split(".").takeLast(2).joinToString(".")
+        }.toSet()
+        if (operators.size < 2) {
+            val msg = "[refresh:$net] only ${operators.size} operator (${operators.joinToString()}) " +
+                "served the block root at slot $slot — NOT cross-validated (root 0x$finalRoot)"
+            if (project.hasProperty("allowSingleSource")) {
+                logger.warn("$msg; -PallowSingleSource set, continuing. " +
+                    "Verify against a $net explorer before trusting this anchor.")
+            } else {
+                throw GradleException("$msg. Re-run with -PallowSingleSource to accept it.")
+            }
+        }
+        return finalRoot
     }
-    if (resolved.isEmpty()) {
-        throw GradleException("No $net endpoint could resolve the block root at slot $minSlot")
-    }
-    val distinct = resolved.map { it.root }.toSet()
-    if (distinct.size != 1) {
-        val detail = resolved.joinToString("\n  ") { "${it.base} → 0x${it.root}" }
+    val agreedRoot = crossValidatedRoot(minSlot, mustExist = true)!!
+
+    // Phase 3 — can a fresh install actually START from it? The endpoints above
+    // answer for the chain; a fresh install bootstraps from this build's pinned
+    // CL servers, and those need not hold a bootstrap for every finalized root.
+    // v0.1.22's Sepolia refresh agreed on slot 11640768, canonical and
+    // finalized, and both pins answered "unavailable" for it while serving its
+    // neighbours, so the release's cold-start check failed after the fact.
+    // So ask the pins first (`examples/checkpoint_served.rs`, the same request
+    // and acceptance as `tests/live_pins_alive.rs`). At head, a root they do not
+    // serve is skipped for the epoch boundary before it, cross-validated the
+    // same way, at most CHECKPOINT_SERVED_WALK epochs back; an explicit
+    // -Pslot/-Pperiod is a statement of intent, so it is refused, not moved.
+    val (anchorSlot, anchorRoot) = run {
+        when (checkpointServedByPins(project, logger, net, minSlot, agreedRoot)) {
+            ServedVerdict.SERVED, ServedVerdict.SKIPPED -> return@run minSlot to agreedRoot
+            ServedVerdict.NOT_SERVED -> Unit
+        }
+        if (pinnedSlot != null) {
+            throw GradleException(
+                "[refresh:$net] the pinned CL servers do not serve a bootstrap for slot $minSlot " +
+                "(0x$agreedRoot); a fresh install could not start from it. Pick another -Pslot, " +
+                "or pass -PskipServedCheck to write it anyway (testing only).")
+        }
+        val slotsPerEpoch = checkpointSlotsPerEpoch.getValue(net)
+        // The nearest boundary strictly below minSlot first. The finalized
+        // block sits BEFORE its boundary when that boundary slot was skipped,
+        // and then the boundary at or below it is already the earlier one.
+        var candidate = minSlot - minSlot % slotsPerEpoch +
+            (if (minSlot % slotsPerEpoch == 0L) 0L else slotsPerEpoch)
+        repeat(CHECKPOINT_SERVED_WALK) {
+            candidate -= slotsPerEpoch
+            val root = try {
+                crossValidatedRoot(candidate, mustExist = false)
+            } catch (e: GradleException) {
+                // Name the walk, or the advice in the message (-PallowSingleSource,
+                // say) reads as if it were about the head root, and re-running
+                // with it would lower the gate for that root too.
+                throw GradleException("[refresh:$net] the finalized root at slot $minSlot is not served by the " +
+                    "pinned CL servers, so the task stepped back to slot $candidate (epoch " +
+                    "${candidate / slotsPerEpoch}), and that candidate could not be cross-validated: ${e.message}", e)
+            }
+            if (root == null) {
+                logger.lifecycle("[refresh:$net] no endpoint resolved slot $candidate (a skipped epoch boundary, " +
+                    "or every endpoint failing: see the warnings above); stepping back")
+                return@repeat
+            }
+            if (checkpointServedByPins(project, logger, net, candidate, root) == ServedVerdict.SERVED) {
+                logger.lifecycle("[refresh:$net] slot $minSlot is not served by the pins; using slot $candidate " +
+                    "(the boundary of epoch ${candidate / slotsPerEpoch}, ${minSlot - candidate} slots earlier), " +
+                    "which they serve")
+                return@run candidate to root
+            }
+        }
         throw GradleException(
-            "Cross-validation FAILED at slot $minSlot. Endpoints disagreed:\n  $detail\n" +
-            "Aborting; NetworkConfig.java not modified.")
-    }
-    val finalRoot = distinct.single()
-    // REFUSE below two agreeing OPERATORS rather than warn. This writes a TRUST
-    // ROOT, and the per-network tasks this replaces already refused — warning
-    // instead would have quietly weakened mainnet and sepolia while claiming to
-    // unify them. Agreement is counted per registrable domain, not per URL:
-    // two hostnames of the same operator (gnosis-beacon-api.publicnode.com and
-    // gnosis-beacon.publicnode.com, say) are one voice, not two — otherwise a
-    // single operator could satisfy the gate alone. -PallowSingleSource is the
-    // named escape hatch for a chain whose providers really are unavailable, so
-    // the weaker guarantee is always an explicit choice made on the command line.
-    val operators = resolved.map { hdr ->
-        URI(hdr.base).host.split(".").takeLast(2).joinToString(".")
-    }.toSet()
-    if (operators.size < 2) {
-        val msg = "[refresh:$net] only ${operators.size} operator (${operators.joinToString()}) " +
-            "served the block root at slot $minSlot — NOT cross-validated (root 0x$finalRoot)"
-        if (project.hasProperty("allowSingleSource")) {
-            logger.warn("$msg; -PallowSingleSource set, continuing. " +
-                "Verify against a $net explorer before trusting this anchor.")
-        } else {
-            throw GradleException("$msg. Re-run with -PallowSingleSource to accept it.")
-        }
+            "[refresh:$net] the pinned CL servers serve no bootstrap for the finalized root at slot $minSlot " +
+            "nor for the $CHECKPOINT_SERVED_WALK epoch boundaries before it; nothing written. Check the pins " +
+            "(`NET=$net cargo test -p myotis-net --test live_pins_alive -- --ignored --nocapture`).")
     }
 
     // An anchor pinned to a chosen old slot is NOT "recent finalized" — wrong
     // provenance wording beside a trust root invites the next reader to trust
     // the wrong story, same argument as keeping provenance inside the markers.
     val provenance = if (pinnedSlot != null) "pinned" else "recent finalized"
-    writeCheckpointRegions(project, logger, net, minSlot, finalRoot, provenance)
+    writeCheckpointRegions(project, logger, net, anchorSlot, anchorRoot, provenance)
+}
+
+/** How many epoch boundaries `refreshCheckpoint` steps back from the finalized
+ *  root when the pinned CL servers do not serve it. Eight is a few minutes of
+ *  chain on gnosis and under an hour on mainnet: well inside every network's
+ *  weak-subjectivity bound, and far enough to pass a root the servers missed. */
+val CHECKPOINT_SERVED_WALK = 8
+
+enum class ServedVerdict { SERVED, NOT_SERVED, SKIPPED }
+
+/**
+ * Ask this build's pinned CL servers whether they serve a light-client
+ * bootstrap for (slot, root), through `rust/myotis-net/examples/checkpoint_served.rs`.
+ * SERVED / NOT_SERVED follow its exit status; SKIPPED is a network with no pins
+ * (chiado) or an explicit `-PskipServedCheck`. Everything else refuses: no
+ * cargo, no pin answering, a probe that cannot run. A check that cannot run is
+ * not a check that passed.
+ */
+fun checkpointServedByPins(
+    project: Project,
+    logger: org.gradle.api.logging.Logger,
+    net: String,
+    slot: Long,
+    root: String,
+): ServedVerdict {
+    if (project.hasProperty("skipServedCheck")) {
+        logger.warn("[refresh:$net] -PskipServedCheck: NOT asking the pinned CL servers whether they serve " +
+            "slot $slot (0x$root). A fresh install may be unable to start from this anchor.")
+        return ServedVerdict.SKIPPED
+    }
+    // rustAvailable, not "a cargo file exists": the rustup proxy is a file even
+    // when it cannot provide the pinned toolchain, and then exits 1 itself,
+    // which must not read as the probe's "not served".
+    if (!rustAvailable) {
+        throw GradleException("[refresh:$net] ${rustSkipNote ?: "cargo is not usable"}. A working cargo is " +
+            "needed to ask the pinned CL servers whether they serve the new anchor " +
+            "(rust/myotis-net/examples/checkpoint_served.rs). On a host without one, pass -PskipServedCheck " +
+            "to write the anchor without asking (the cross-validation still applies).")
+    }
+    logger.lifecycle("[refresh:$net] asking the pinned CL servers for a bootstrap at slot $slot (0x${root.take(8)}…)")
+    val pb = ProcessBuilder(
+        rustTool("cargo"), "run", "--locked", "--release", "--quiet", "-p", "myotis-net",
+        "--example", "checkpoint_served", "--", "--net", net, "--slot", slot.toString(), "--root", root,
+    ).directory(project.rootDir.resolve("rust")).redirectErrorStream(true)
+    rustToolchainPath?.let { pb.environment()["PATH"] = it }
+    // The same rustflags as every other cargo task (see reproducibleRustEnv),
+    // so this build shares rust/target with cargoBuildHost instead of
+    // rebuilding the dependency graph in turn with it.
+    pb.environment().putAll(reproducibleRustEnv)
+    val proc = pb.start()
+    // cargo's own output (a compile error, a panic) is kept, and shown when the
+    // probe did not give a verdict; the first release build can also take
+    // minutes, so say so.
+    logger.lifecycle("[refresh:$net] (the first run builds the probe in release mode, which can take minutes)")
+    val other = mutableListOf<String>()
+    var probeSpoke = false
+    proc.inputStream.bufferedReader().forEachLine { line ->
+        if (line.startsWith("[served]")) {
+            probeSpoke = true
+            logger.lifecycle("[refresh:$net] $line")
+        } else { other += line; logger.info(line) }
+    }
+    val exit = proc.waitFor()
+    // A verdict status counts only when the probe itself gave it: each of its
+    // verdict exits prints a [served] line first, and a 1 from cargo or rustup
+    // (a toolchain it cannot provide, a failed build) prints none.
+    val code = if (exit in setOf(0, 1, 3, 4) && !probeSpoke) -1 else exit
+    if (code !in setOf(0, 1, 3, 4)) other.takeLast(40).forEach { logger.warn(it) }
+    return when (code) {
+        0 -> ServedVerdict.SERVED
+        1 -> ServedVerdict.NOT_SERVED
+        3 -> {
+            logger.warn("[refresh:$net] $net pins no CL server; the bootstrap check does not apply")
+            ServedVerdict.SKIPPED
+        }
+        4 -> throw GradleException("[refresh:$net] no pinned CL server answered, so whether they serve slot " +
+            "$slot is unknown; nothing written. Re-run, or pass -PskipServedCheck.")
+        else -> throw GradleException("[refresh:$net] the bootstrap check failed to run (exit $exit" +
+            "${if (code == -1) ", with no verdict from the probe" else ""}; its output is above); nothing written. " +
+            "Run it by hand: cd rust && cargo run --release -p myotis-net --example checkpoint_served -- " +
+            "--net $net --slot $slot --root $root")
+    }
 }
 
 /** `ethp2p.<net>.genesisTime`, guarded: a missing or malformed property would
@@ -2479,7 +2629,7 @@ val checkpointGenesisValidatorsRoot = mapOf(
  */
 tasks.register("refreshCheckpoint") {
     group = "trust"
-    description = "Refresh trusted checkpoints in NetworkConfig.java AND the Rust ChainConfig. -Pnetwork=<name> for one, -Pdry to preview, -Pperiod=<n>/-Pslot=<n> to pin instead of head, -PanchorFile=<file> to write recorded test anchors without fetching."
+    description = "Refresh trusted checkpoints in NetworkConfig.java AND the Rust ChainConfig, only at a root the pinned CL servers serve. -Pnetwork=<name> for one, -Pdry to preview, -Pperiod=<n>/-Pslot=<n> to pin instead of head, -PanchorFile=<file> to write recorded test anchors without fetching, -PskipServedCheck to skip asking the pins."
 
     doLast {
         val only = project.findProperty("network") as String?
@@ -2505,7 +2655,7 @@ tasks.register("refreshCheckpoint") {
             nets.forEach { net -> refreshOneCheckpoint(project, logger, net) }
             return@doLast
         }
-        val conflicting = listOf("slot", "period", "extraEndpoint", "allowSingleSource")
+        val conflicting = listOf("slot", "period", "extraEndpoint", "allowSingleSource", "skipServedCheck")
             .filter { project.hasProperty(it) }
         if (conflicting.isNotEmpty()) {
             throw GradleException("-PanchorFile writes recorded anchors; it cannot be combined with " +
