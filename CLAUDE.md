@@ -170,6 +170,8 @@ required `reproducible builds` run.
   commit only on a yes in THIS conversation, including for wording that comes
   from a review finding or "only clarifies". Full text:
   `.claude/agent/workflow.md`.
+- **When in doubt who makes a decision, ask the owner, never assume**
+  (owner's decision, 2026-11-23). Full text: `.claude/agent/workflow.md`.
 
 ### Multi-PR plans land through a feature branch, never piece by piece on `main`
 

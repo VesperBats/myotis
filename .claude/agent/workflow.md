@@ -117,3 +117,10 @@ fills a gap (naming an actor the rule left unnamed is one). Only a verbatim
 move needs no question; the PR says it is verbatim. A review comment proposing
 a rule change is answered *Deferred* and becomes such a question; it is never
 applied first.
+
+**When in doubt who decides, ask** (owner's decision, 2026-11-23). If it is
+unclear whether a decision or an action is the owner's or the agent's (a rule
+that names no actor, two rules that seem to disagree, a case no rule covers),
+ask the owner before acting. Do not fill the gap with the author's judgment, a
+reviewer's suggestion or what an earlier session did. When the answer is a
+lasting rule, it becomes a rule change under this section.
