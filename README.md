@@ -6,7 +6,7 @@ build needs no GitHub token:
 
 ```kotlin
 maven {
-    url = uri("https://raw.githubusercontent.com/biafra23/myotis/maven-repo")
+    url = uri("https://raw.githubusercontent.com/VesperBats/myotis/maven-repo")
     content { includeGroup("eth.myotis") }
 }
 ```
