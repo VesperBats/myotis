@@ -23,8 +23,9 @@ its trust anchors and release checks.
 
 - Engine library: publishing to GitHub Packages failed with HTTP 404 after the
   repository moved to `VesperBats/myotis`; the publish URL, and the one in the
-  Android library guide, now name the new location. v0.1.21 is not on GitHub
-  Packages; it is on the `maven-repo` branch and attached to its release.
+  Android library guide, now name the new location. The failure left v0.1.21
+  without its engine library: it is not on GitHub Packages, the `maven-repo`
+  branch or its release. Library users stay on 0.1.21-rc1 until v0.1.22.
 
 ## [0.1.21] - 2026-11-22
 
