@@ -701,7 +701,7 @@ configure(subprojects.filter { it.name in publishedArtifactIds }) {
                 // The repository this build publishes from: Actions names it in GITHUB_REPOSITORY
                 // (VesperBats/myotis since the move; the old biafra23/myotis path answers 404 to a
                 // publish, which skipped v0.1.21's whole engine-library publication).
-                url = uri("https://maven.pkg.github.com/${System.getenv("GITHUB_REPOSITORY") ?: "VesperBats/myotis"}")
+                url = uri("https://maven.pkg.github.com/${System.getenv("GITHUB_REPOSITORY")?.takeIf { it.isNotBlank() } ?: "VesperBats/myotis"}")
                 // Actions supplies both (packages: write on the job); a maintainer
                 // publishing by hand exports a classic PAT with write:packages
                 // under the same two names. Unset everywhere else, which only a
