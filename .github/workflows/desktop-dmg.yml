@@ -90,12 +90,17 @@ jobs:
       # release job needs every leg of this job), and the release job uploads
       # the PoC dmg only if it exists. On main the leg is a hard gate like the
       # others.
+      # SWITCHED OFF (owner's decision, 2026-11-22; .claude/agent/releases.md,
+      # step 5): the bee-poc entry is out of the full matrix below, until the
+      # general log index comes back on Swarm. To restore it, append
+      # {"arch":"arm64","java-arch":"aarch64","flavor":"bee-poc","gradle-args":"-PbeePoc",
+      #  "dmg":"Myotis-bee-poc-arm64.dmg","artifact":"myotis-bee-poc-dmg-arm64"}.
       # Each entry carries its own build flags, dmg name and artifact name so
       # the steps below stay data-driven.
       matrix:
         include: ${{ (github.event_name == 'merge_group' || (github.event_name == 'workflow_dispatch' && !startsWith(github.ref, 'refs/tags/')))
           && fromJSON('[{"arch":"arm64","java-arch":"aarch64","flavor":"standard","gradle-args":"","dmg":"Myotis-arm64.dmg","artifact":"myotis-desktop-dmg-arm64"}]')
-          || fromJSON('[{"arch":"arm64","java-arch":"aarch64","flavor":"standard","gradle-args":"","dmg":"Myotis-arm64.dmg","artifact":"myotis-desktop-dmg-arm64"},{"arch":"x64","java-arch":"x64","flavor":"standard","gradle-args":"","dmg":"Myotis-x64.dmg","artifact":"myotis-desktop-dmg-x64"},{"arch":"arm64","java-arch":"aarch64","flavor":"bee-poc","gradle-args":"-PbeePoc","dmg":"Myotis-bee-poc-arm64.dmg","artifact":"myotis-bee-poc-dmg-arm64"}]') }}
+          || fromJSON('[{"arch":"arm64","java-arch":"aarch64","flavor":"standard","gradle-args":"","dmg":"Myotis-arm64.dmg","artifact":"myotis-desktop-dmg-arm64"},{"arch":"x64","java-arch":"x64","flavor":"standard","gradle-args":"","dmg":"Myotis-x64.dmg","artifact":"myotis-desktop-dmg-x64"}]') }}
     # The PoC is best-effort on TAG builds only — its failure is reported but
     # never fails this job there, so it never blocks a release. On pushes to
     # main it is a hard gate like the standard legs: a PoC regression (seed,

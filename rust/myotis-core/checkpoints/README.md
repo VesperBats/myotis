@@ -18,7 +18,7 @@ hash, and the top. A table that does not match is refused.
 - **Built** 2026-11-20 by eth2swarm's `ethswarm checkpoint-table` (VesperBats/eth2swarm#32)
   from Erigon 3.8.1. The tool hashed every header itself and linked each one by `parentHash`
   down to the genesis hash `0xd4e56740…8fa3`.
-- **Top:** block 26,457,537 (`0x229a7a21…85fc`), the source node's finalized block. It was
+- **Top, as first built:** block 26,457,537 (`0x229a7a21…85fc`), the source node's finalized block. It was
   cross-checked against Geth 1.17.7: 203 entries and the top block were equal. The owner ruled
   on 2026-11-20 that this suffices for the first table. The running node's gap walk, from its
   beacon-attested finalized block down to the top, checks the top again.
@@ -27,7 +27,14 @@ hash, and the top. A table that does not match is refused.
   two ends are checked: the genesis hash, and the cross-checked top. An entry off that chain
   would have broken the walk. The 203 sampled entries are a check of the tool, not the whole
   check.
-- **Size:** 25,838 entries, 826,816 bytes. keccak256 `0xccf5ad88…03d0`.
+- **Size (as first built):** 25,838 entries, 826,816 bytes. keccak256 `0xccf5ad88…03d0`.
+- **Extended for v0.1.21** (2026-11-22, release step 6) by `ethswarm checkpoint-table --extend`
+  (VesperBats/eth2swarm#33; eth2swarm at `2707995`) from the nuc's Erigon 3.8.1, cross-checked
+  against Geth 1.17.7 on zbox: 203 entries and the top block were equal. The walk started at the
+  old last entry, reproduced it, passed through the old top (block 26,457,537) and went up to the
+  new top: block **26,467,996** (`0x2a207fd0…01f6`), the source node's finalized block. The old
+  826,816 bytes are kept byte for byte (`cmp -n`). Now 25,848 entries, 827,136 bytes, keccak256
+  `0x2e243c40…2778`.
 
 ## Changing a table
 
