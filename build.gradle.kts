@@ -39,7 +39,7 @@ plugins {
 
 allprojects {
     group = "com.jaeckel.ethp2p"
-    version = "0.1.21-SNAPSHOT"
+    version = "0.1.22-SNAPSHOT"
 
     // === Reproducible archives (#734, Part 4) ================================
     // Every Gradle archive — jars, the AAR bundle, the natives jars, sources
@@ -682,7 +682,7 @@ configure(subprojects.filter { it.name in publishedArtifactIds }) {
             pom {
                 name.set(publishedArtifactId)
                 description.set(publishedDescription)
-                url.set("https://github.com/biafra23/myotis")
+                url.set("https://github.com/VesperBats/myotis")
                 licenses {
                     license {
                         name.set("Apache-2.0")
@@ -690,8 +690,8 @@ configure(subprojects.filter { it.name in publishedArtifactIds }) {
                     }
                 }
                 scm {
-                    url.set("https://github.com/biafra23/myotis")
-                    connection.set("scm:git:https://github.com/biafra23/myotis.git")
+                    url.set("https://github.com/VesperBats/myotis")
+                    connection.set("scm:git:https://github.com/VesperBats/myotis.git")
                 }
             }
         }

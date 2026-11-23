@@ -114,7 +114,7 @@ the file was built from.
 
 ```bash
 gh attestation verify Myotis-v0.1.21-android.apk \
-  --repo biafra23/myotis --source-ref refs/tags/v0.1.21
+  --repo VesperBats/myotis --source-ref refs/tags/v0.1.21
 ```
 
 It fails if the file is not one a workflow of this repository attested for

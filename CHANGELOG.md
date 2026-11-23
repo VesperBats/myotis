@@ -19,6 +19,34 @@ its trust anchors and release checks.
 
 ## [Unreleased]
 
+## [0.1.22] - 2026-11-23
+
+### Fixed
+
+- Engine library: v0.1.21 shipped without it. Its publish to GitHub Packages
+  failed with HTTP 404 after the repository moved to `VesperBats/myotis`, and
+  that failure also kept it off the `maven-repo` branch and the release. The
+  publish URL now comes from the repository the build runs in, lowercased
+  (#916). A build that resolves the library from GitHub Packages changes its
+  repository URL to `https://maven.pkg.github.com/vesperbats/myotis` too, as
+  the Android library guide now shows. 0.1.22 is the first engine library
+  since 0.1.21-rc1.
+- Published POMs name the repository as `VesperBats/myotis` (`url`, `scm`),
+  and the release notes' `gh attestation verify` hint uses `--repo
+  VesperBats/myotis`: v0.1.21's attestations verify under that name and not
+  under the old one.
+
+### Changed
+
+- Engine ABI 60 (unchanged from 0.1.21).
+- Trust anchors: the embedded checkpoints of mainnet and Gnosis moved to
+  2026-11-23 (mainnet slot 15,716,544) in the Java and Rust engines, and
+  mainnet's in the Go engine too. Sepolia keeps v0.1.21's anchor (slot
+  11,632,064): neither pinned Sepolia server served the newer one. The
+  checkpoint table extends to block
+  26,476,643, cross-checked against a second node. The mainnet bootnodes still
+  equal go-ethereum's.
+
 ## [0.1.21] - 2026-11-22
 
 ### Added
@@ -672,7 +700,8 @@ MetaMask; ENS with CCIP-Read; mainnet and Gnosis Chain; the Android app, the
 shared Compose Multiplatform UI and the macOS dmg; and `:myotis-api`, the
 engine contract (#1 to #123).
 
-[Unreleased]: https://github.com/biafra23/myotis/compare/v0.1.21...HEAD
+[Unreleased]: https://github.com/biafra23/myotis/compare/v0.1.22...HEAD
+[0.1.22]: https://github.com/biafra23/myotis/compare/v0.1.21...v0.1.22
 [0.1.21]: https://github.com/biafra23/myotis/compare/v0.1.21-rc1...v0.1.21
 [0.1.21-rc1]: https://github.com/biafra23/myotis/compare/v0.1.20...v0.1.21-rc1
 [0.1.20]: https://github.com/biafra23/myotis/compare/v0.1.20-rc1...v0.1.20

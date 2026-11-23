@@ -35,6 +35,13 @@ hash, and the top. A table that does not match is refused.
   new top: block **26,467,996** (`0x2a207fd0…01f6`), the source node's finalized block. The old
   826,816 bytes are kept byte for byte (`cmp -n`). Now 25,848 entries, 827,136 bytes, keccak256
   `0x2e243c40…2778`.
+- **Extended for v0.1.22** (2026-11-23, release step 6) the same way: the same `ethswarm` build
+  (eth2swarm at `2707995`), the nuc's Erigon 3.8.1, cross-checked against Geth 1.17.7 on zbox
+  (203 entries and the top block equal). The walk started at the old last entry (block
+  26,467,328), passed through the old top (block 26,467,996) and went up to the new top: block
+  **26,476,643** (`0xd9871937…eec2`), the source node's finalized block. The old 827,136 bytes
+  are kept byte for byte (`cmp -n`). Now 25,857 entries, 827,424 bytes, keccak256
+  `0xe6cbcf47…013f`.
 
 ## Changing a table
 
