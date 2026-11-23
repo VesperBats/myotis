@@ -26,10 +26,11 @@ its trust anchors and release checks.
 - Engine library: v0.1.21 shipped without it. Its publish to GitHub Packages
   failed with HTTP 404 after the repository moved to `VesperBats/myotis`, and
   that failure also kept it off the `maven-repo` branch and the release. The
-  publish URL now comes from the repository the build runs in (#916). A build
-  that resolves the library from GitHub Packages changes its repository URL to
-  `https://maven.pkg.github.com/VesperBats/myotis` too, as the Android library
-  guide now shows. 0.1.22 is the first engine library since 0.1.21-rc1.
+  publish URL now comes from the repository the build runs in, lowercased
+  (#916). A build that resolves the library from GitHub Packages changes its
+  repository URL to `https://maven.pkg.github.com/vesperbats/myotis` too, as
+  the Android library guide now shows. 0.1.22 is the first engine library
+  since 0.1.21-rc1.
 - Published POMs name the repository as `VesperBats/myotis` (`url`, `scm`),
   and the release notes' `gh attestation verify` hint uses `--repo
   VesperBats/myotis`: v0.1.21's attestations verify under that name and not
