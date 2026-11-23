@@ -62,33 +62,16 @@ use std::time::Duration;
 
 use libp2p::{Multiaddr, PeerId};
 use myotis_consensus::spec::SYNC_COMMITTEE_SIZE;
-use myotis_consensus::store::{
-    headers_in_attested_forks_shape, LightClientProcessor, LightClientStore,
-};
-use myotis_consensus::types::{LightClientBootstrap, LightClientUpdate};
+use myotis_consensus::store::headers_in_attested_forks_shape;
+use myotis_consensus::types::LightClientUpdate;
 use myotis_net::codec;
 use myotis_net::reqresp::{self, LocalStatus};
 use myotis_net::status::StatusMessage;
 use myotis_net::{protocols, ChainConfig, SyncHandle, SyncState};
 
-/// Per-peer dial + identify budget. Generous: a healthy server answers in well
-/// under a second, and a slow-but-alive one must not be reported as dead.
-const PIN_TIMEOUT: Duration = Duration::from_secs(20);
-
-/// A first bootstrap request may legitimately MISS. roost's handler is a pure
-/// cache read — the design forbids I/O on the swarm task — so an uncached root
-/// answers `ResourceUnavailable` and queues a background fetch, expecting the
-/// wallet to retry (`rust/roost/src/store.rs`, "a miss stays
-/// ResourceUnavailable, with a background task filling it"). roost drops its
-/// cached bootstraps whenever the fork/blob schedule changes, and starts empty
-/// after a restart, so a single-shot check reports the project's own primary
-/// server as dead on a cold cache. Retry the way a wallet does.
-/// One full roost REFRESH tick (12 s, `roost/src/serve.rs`) plus fetch
-/// headroom: `fill_bootstrap_misses` runs once per tick, so a shorter backoff
-/// retries BEFORE the fill it is waiting for and reports a cold-but-healthy
-/// server as dead — the false reading this retry exists to remove.
-const MISS_RETRIES: usize = 2;
-const MISS_BACKOFF: Duration = Duration::from_secs(15);
+#[path = "../examples/probe_common/bootstrap_ask.rs"]
+mod bootstrap_ask;
+use bootstrap_ask::{ask_bootstrap, NotServed, Served, PIN_TIMEOUT};
 
 /// Gap before re-asking for updates. Light-client servers rate-limit each
 /// protocol separately (Lighthouse: one request per 10 s), so a request issued
@@ -115,7 +98,10 @@ const MIN_TABLE_ENTRIES: usize = 8;
 const MIN_ALIVE_PINS: usize = 2;
 
 fn config_for_env() -> ChainConfig {
-    match std::env::var("NET").unwrap_or_else(|_| "gnosis".into()).as_str() {
+    match std::env::var("NET")
+        .unwrap_or_else(|_| "gnosis".into())
+        .as_str()
+    {
         "mainnet" => ChainConfig::mainnet(),
         "sepolia" => ChainConfig::sepolia(),
         "gnosis" => ChainConfig::gnosis(),
@@ -222,7 +208,9 @@ fn head_update_ok(
     let slot = update.attested_header.beacon.slot;
     let attested_period = slot / config.slots_per_period();
     if attested_period != period {
-        return Err(format!("an update attested in period {attested_period} (slot {slot})"));
+        return Err(format!(
+            "an update attested in period {attested_period} (slot {slot})"
+        ));
     }
     // The processor's own shape gate, not a copy of it.
     if !headers_in_attested_forks_shape(
@@ -231,7 +219,9 @@ fn head_update_ok(
         &update.finalized_header,
     ) {
         let fork = config.fork_schedule.lc_fork_at_slot(slot);
-        return Err(format!("an update for slot {slot} not in its fork's ({fork:?}) wire shape"));
+        return Err(format!(
+            "an update for slot {slot} not in its fork's ({fork:?}) wire shape"
+        ));
     }
     let participants = update.sync_aggregate.count_participants();
     if participants * 3 < SYNC_COMMITTEE_SIZE * 2 {
@@ -266,7 +256,10 @@ async fn every_pinned_cl_peer_serves_this_builds_anchor() {
     init_tracing();
     assert_no_cl_env_overrides();
     let config = config_for_env();
-    assert!(!config.static_peers.is_empty(), "this network pins no CL peers");
+    assert!(
+        !config.static_peers.is_empty(),
+        "this network pins no CL peers"
+    );
 
     let local = LocalStatus::new(StatusMessage {
         fork_digest: config.current_fork_digest(),
@@ -311,185 +304,100 @@ async fn every_pinned_cl_peer_serves_this_builds_anchor() {
             eprintln!("[pins] BAD  {pin} — no peer id");
             continue;
         };
-        // `None` until the first attempt runs; the loop below always sets it.
-        let mut outcome = None;
-        for attempt in 0..=MISS_RETRIES {
-            if attempt > 0 {
-                eprintln!("[pins] .... {addr} retrying after a miss ({attempt}/{MISS_RETRIES})");
-                tokio::time::sleep(MISS_BACKOFF).await;
-            }
-            let req = myotis_net::codec::encode_request(&config.checkpoint_root);
-            outcome = Some(
-                tokio::time::timeout(
-                    PIN_TIMEOUT,
-                    client.request_raw(peer, addr.clone(), protocols::BOOTSTRAP, req),
-                )
-                .await,
-            );
-            // Only a cache MISS is worth retrying. Decide that on the eth2
-            // RESULT CODE — byte 0 of the response frame — never on the
-            // response's length: an error chunk is `code || varint ||
-            // snappy(msg)`, about 20 B of framing plus the message, so a
-            // 45-character error outweighs any length threshold — myotis-net's
-            // own responder answers "InvalidRequest: bootstrap root must be 32
-            // bytes" in 65 B. InvalidRequest and ServerError are final answers;
-            // only ResourceUnavailable is the miss roost fills in the background.
-            match &outcome {
-                Some(Ok(Ok(raw))) if raw.first() == Some(&codec::RESULT_RESOURCE_UNAVAILABLE) => {
-                    continue
-                }
-                _ => break,
-            }
-        }
-        match outcome.expect("the retry loop always runs at least once") {
-            Ok(Ok(raw)) => match codec::decode_response(&raw, true) {
-                Ok(d) if !d.ssz_payload.is_empty() => {
-                    // Framing alone is not evidence. Apply the SAME acceptance
-                    // the production bootstrap path does (sync.rs): the
-                    // checkpoint pin — we chose the root, the peer chose the
-                    // payload — plus both Merkle branches. Without it a
-                    // bootstrap for some other anchor, or bytes that merely
-                    // decompress, would count as a healthy pin that a fresh
-                    // install then rejects.
-                    // Deliberately NOT compared against current_fork_digest():
-                    // a bootstrap's context bytes follow the slot of the block
-                    // it anchors to, not the wall clock, and a still-valid
-                    // checkpoint can sit behind a fork boundary — roost stamps
-                    // them that way on purpose (`roost/src/serve.rs`, "stamping
-                    // it with head's digest would be wrong for exactly the
-                    // wallets that are furthest behind"). The production
-                    // bootstrap path does not check it either; the checkpoint
-                    // pin and the two branches below are the real proof.
-                    let mut processor = LightClientProcessor::new(
-                        LightClientStore::new(config.slots_per_period()),
-                        config.fork_schedule.clone(),
-                        config.genesis_validators_root,
-                    );
-                    let verdict = {
-                        let fork = config.lc_fork_of_chunk(
-                            &d.fork_digest,
-                            d.ssz_payload.len(),
-                            LightClientBootstrap::GLOAS_SIZE,
-                        );
-                        match LightClientBootstrap::decode_for(fork, &d.ssz_payload) {
-                            Err(e) => Err(format!("bootstrap did not decode: {e}")),
-                            Ok(b) if b.header.beacon.hash_tree_root() != config.checkpoint_root => {
-                                Err(format!(
-                                    "served a bootstrap for root {}, not our anchor",
-                                    b.header.beacon.hash_tree_root()[..8]
-                                        .iter()
-                                        .map(|x| format!("{x:02x}"))
-                                        .collect::<String>()
-                                ))
-                            }
-                            // The production checks, at the proof indices of the
-                            // header's fork (sync.rs bootstrap path).
-                            Ok(b) => processor
-                                .verify_bootstrap(&b)
-                                .map(|()| b)
-                                .map_err(|reason| reason.to_string()),
-                        }
-                    };
-                    match verdict {
-                        Err(why) => {
-                            dead.push(format!("{pin} — {why}"));
-                            eprintln!("[pins] BAD  {addr} — {why}");
-                        }
-                        Ok(bootstrap) => {
-                            // #422 was "cannot CATCH UP", which needs
-                            // updates_by_range — a server that bootstraps and
-                            // then refuses updates strands a stale install just
-                            // as thoroughly. So: the anchor period's update,
-                            // through the production processor started from
-                            // this very bootstrap — committee, the 2/3 bar, the
-                            // BLS aggregate and every branch, exactly what a
-                            // fresh install does with it.
-                            processor.store.initialize(
-                                bootstrap.header.clone(),
-                                bootstrap.current_sync_committee.clone(),
-                            );
-                            let at_anchor =
-                                ask_update(&client, &config, peer, &addr, anchor_period, false)
-                                    .await;
-                            let catch_up = match at_anchor {
-                                Ok(update) if processor.process_update(&update) => {
-                                    if head_period <= anchor_period {
-                                        Ok(String::new())
-                                    } else {
-                                        // Same peer and protocol again: wait
-                                        // out its quota window first.
-                                        ask_update(&client, &config, peer, &addr, head_period, true)
-                                            .await
-                                            .and_then(|update| {
-                                                head_update_ok(&config, &update, head_period)
-                                            })
-                                            .map(|participants| {
-                                                format!(
-                                                    ", current period {head_period} at \
-                                                     {participants}/{SYNC_COMMITTEE_SIZE}"
-                                                )
-                                            })
-                                            .map_err(|why| {
-                                                format!(
-                                                    "updates_by_range({head_period}), the current \
-                                                     period, gave {why}"
-                                                )
-                                            })
-                                    }
-                                }
-                                Ok(update) => Err(format!(
-                                    "updates_by_range({anchor_period}) gave an update \
-                                     (attested slot {}, {}/{SYNC_COMMITTEE_SIZE}) the \
-                                     production processor refused — RUST_LOG=debug names \
-                                     the gate",
-                                    update.attested_header.beacon.slot,
-                                    update.sync_aggregate.count_participants()
-                                )),
-                                Err(why) => {
-                                    Err(format!("updates_by_range({anchor_period}) gave {why}"))
-                                }
-                            };
-                            match catch_up {
-                                Ok(head) => {
-                                    alive += 1;
-                                    eprintln!(
-                                        "[pins] OK   {addr} (bootstrap {} B, period \
-                                         {anchor_period} update verified{head})",
-                                        d.ssz_payload.len()
-                                    );
-                                }
-                                Err(why) => {
-                                    dead.push(format!("{pin} — bootstraps, but {why}"));
-                                    eprintln!("[pins] HALF {addr} — bootstrap ok, but {why}");
-                                }
-                            }
+        // The ask and the production acceptance are shared with
+        // `examples/checkpoint_served.rs` (`./gradlew refreshCheckpoint`'s
+        // check), so a root the refresh accepts is one this check accepts.
+        match ask_bootstrap(
+            &client,
+            &config,
+            peer,
+            &addr,
+            config.checkpoint_root,
+            "[pins]",
+        )
+        .await
+        {
+            Ok(Served {
+                bootstrap,
+                mut processor,
+                payload_len,
+            }) => {
+                // #422 was "cannot CATCH UP", which needs
+                // updates_by_range — a server that bootstraps and
+                // then refuses updates strands a stale install just
+                // as thoroughly. So: the anchor period's update,
+                // through the production processor started from
+                // this very bootstrap — committee, the 2/3 bar, the
+                // BLS aggregate and every branch, exactly what a
+                // fresh install does with it.
+                processor.store.initialize(
+                    bootstrap.header.clone(),
+                    bootstrap.current_sync_committee.clone(),
+                );
+                let at_anchor =
+                    ask_update(&client, &config, peer, &addr, anchor_period, false).await;
+                let catch_up = match at_anchor {
+                    Ok(update) if processor.process_update(&update) => {
+                        if head_period <= anchor_period {
+                            Ok(String::new())
+                        } else {
+                            // Same peer and protocol again: wait
+                            // out its quota window first.
+                            ask_update(&client, &config, peer, &addr, head_period, true)
+                                .await
+                                .and_then(|update| head_update_ok(&config, &update, head_period))
+                                .map(|participants| {
+                                    format!(
+                                        ", current period {head_period} at \
+                                         {participants}/{SYNC_COMMITTEE_SIZE}"
+                                    )
+                                })
+                                .map_err(|why| {
+                                    format!(
+                                        "updates_by_range({head_period}), the current \
+                                         period, gave {why}"
+                                    )
+                                })
                         }
                     }
+                    Ok(update) => Err(format!(
+                        "updates_by_range({anchor_period}) gave an update \
+                         (attested slot {}, {}/{SYNC_COMMITTEE_SIZE}) the \
+                         production processor refused — RUST_LOG=debug names \
+                         the gate",
+                        update.attested_header.beacon.slot,
+                        update.sync_aggregate.count_participants()
+                    )),
+                    Err(why) => Err(format!("updates_by_range({anchor_period}) gave {why}")),
+                };
+                match catch_up {
+                    Ok(head) => {
+                        alive += 1;
+                        eprintln!(
+                            "[pins] OK   {addr} (bootstrap {} B, period \
+                             {anchor_period} update verified{head})",
+                            payload_len
+                        );
+                    }
+                    Err(why) => {
+                        dead.push(format!("{pin} — bootstraps, but {why}"));
+                        eprintln!("[pins] HALF {addr} — bootstrap ok, but {why}");
+                    }
                 }
-                Ok(_) => {
-                    dead.push(format!("{pin} — success code with an empty payload"));
-                    eprintln!("[pins] THIN {addr} — empty payload");
-                }
-                Err(e) => {
-                    // Includes ResourceUnavailable that the retries did not
-                    // outlast: roost's background fill is not keeping up. An
-                    // error answer's message is snappy-framed, which
-                    // `decode_response` prints raw; `leading_error` reads it.
-                    let why = match codec::leading_error(&raw) {
-                        Some((code, msg)) => format!("result code {code} {msg:?}"),
-                        None => e.to_string(),
-                    };
-                    dead.push(format!("{pin} — {why}"));
-                    eprintln!("[pins] THIN {addr} — {why}");
-                }
-            },
-            Ok(Err(e)) => {
-                dead.push(format!("{pin} — {e}"));
-                eprintln!("[pins] DEAD {addr} — {e}");
             }
-            Err(_) => {
-                dead.push(format!("{pin} — no answer in {PIN_TIMEOUT:?}"));
-                eprintln!("[pins] DEAD {addr} — timeout");
+            Err(NotServed::Unreachable(why) | NotServed::NoAnswer(why)) => {
+                dead.push(format!("{pin} — {why}"));
+                eprintln!("[pins] DEAD {addr} — {why}");
+            }
+            // Includes ResourceUnavailable that the retries did not outlast:
+            // roost's background fill is not keeping up.
+            Err(NotServed::Unavailable(why)) => {
+                dead.push(format!("{pin} — {why}"));
+                eprintln!("[pins] THIN {addr} — {why}");
+            }
+            Err(NotServed::Invalid(why)) => {
+                dead.push(format!("{pin} — {why}"));
+                eprintln!("[pins] BAD  {addr} — {why}");
             }
         }
     }
@@ -501,7 +409,10 @@ async fn every_pinned_cl_peer_serves_this_builds_anchor() {
     } else {
         format!("the anchor (period {anchor_period})")
     };
-    eprintln!("[pins] {alive} of {total} pinned {} peers served {served}", config.name);
+    eprintln!(
+        "[pins] {alive} of {total} pinned {} peers served {served}",
+        config.name
+    );
     if !dead.is_empty() {
         // Not a failure by itself — see the header — but always worth a human
         // look, because a dead pin is not free: it is exempt from eviction, so

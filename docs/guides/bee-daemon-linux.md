@@ -126,7 +126,9 @@ cp -n data/bee/gnosis/cl-peers-gnosis.cache app/
 ```
 
 This writes a fresh Gnosis checkpoint into both engines' sources. It refuses a
-root that fewer than two checkpoint operators agree on. It is a local change to
+root that fewer than two checkpoint operators agree on, and one the pinned CL
+servers cannot serve a bootstrap for. That second check needs cargo; on a host
+without it, add `-PskipServedCheck`. It is a local change to
 tracked files (`git diff` shows it). Keep it, or `git stash` it before you pull.
 
 Why this is needed: Gnosis's weak-subjectivity bound is short. An anchor more
@@ -421,6 +423,6 @@ The SSH tunnel keeps it private.
 | `-32000 requested range is not indexed yet (covered: A-B)` | Honest refusal. The range is outside coverage. Wait for the walk or the bridge, or (path A) check the seed's `usableUntilBlock` |
 | `headGap` never closes on path A | The seed is past its shelf life (more than 500,000 blocks behind the head). Re-synthesize from a current checkout |
 | `headGap` never closes on path B | The daemon was down for more than ~500,000 blocks (~29 days). The bridge does not close a gap that wide, and the walk only goes downward, so it never fills a gap above coverage. Do not re-seed, because that would replace verified coverage with unverified data. Delete the index and walk again (*Moving from A to B*, then path B). To avoid this, keep downtime under ~29 days |
-| `beacon-status` says `STALE_ANCHOR` | The anchor is past Gnosis's ~34 h bound. Run `refreshCheckpoint -Pnetwork=gnosis` and restart, or consent once with `-Pargs=accept-stale-anchor` |
+| `beacon-status` says `STALE_ANCHOR` | The anchor is past Gnosis's ~34 h bound. Run `refreshCheckpoint -Pnetwork=gnosis` (add `-PskipServedCheck` on a host without cargo) and restart, or consent once with `-Pargs=accept-stale-anchor` |
 | `403` through a proxy or forwarder | The `Host` header is not a loopback name. Use the SSH tunnel |
 | Port 8546 already in use | Another Myotis (for example the desktop app running Gnosis) holds it. Stop that one, or Bee may end up talking to an instance without the index |

@@ -2236,7 +2236,16 @@ fun refreshOneCheckpoint(project: Project, logger: org.gradle.api.logging.Logger
             (if (minSlot % slotsPerEpoch == 0L) 0L else slotsPerEpoch)
         repeat(CHECKPOINT_SERVED_WALK) {
             candidate -= slotsPerEpoch
-            val root = crossValidatedRoot(candidate, mustExist = false)
+            val root = try {
+                crossValidatedRoot(candidate, mustExist = false)
+            } catch (e: GradleException) {
+                // Name the walk, or the advice in the message (-PallowSingleSource,
+                // say) reads as if it were about the head root, and re-running
+                // with it would lower the gate for that root too.
+                throw GradleException("[refresh:$net] the finalized root at slot $minSlot is not served by the " +
+                    "pinned CL servers, so the task stepped back to slot $candidate (epoch " +
+                    "${candidate / slotsPerEpoch}), and that candidate could not be cross-validated: ${e.message}", e)
+            }
             if (root == null) {
                 logger.lifecycle("[refresh:$net] no endpoint resolved slot $candidate (a skipped epoch boundary, " +
                     "or every endpoint failing: see the warnings above); stepping back")
@@ -2244,7 +2253,8 @@ fun refreshOneCheckpoint(project: Project, logger: org.gradle.api.logging.Logger
             }
             if (checkpointServedByPins(project, logger, net, candidate, root) == ServedVerdict.SERVED) {
                 logger.lifecycle("[refresh:$net] slot $minSlot is not served by the pins; using slot $candidate " +
-                    "(${(minSlot - candidate) / slotsPerEpoch} epoch(s) earlier), which they serve")
+                    "(the boundary of epoch ${candidate / slotsPerEpoch}, ${minSlot - candidate} slots earlier), " +
+                    "which they serve")
                 return@run candidate to root
             }
         }
@@ -2289,10 +2299,14 @@ fun checkpointServedByPins(
             "slot $slot (0x$root). A fresh install may be unable to start from this anchor.")
         return ServedVerdict.SKIPPED
     }
-    if (rustToolBinDir == null) {
-        throw GradleException("[refresh:$net] cargo is needed to ask the pinned CL servers whether they serve " +
-            "the new anchor (rust/myotis-net/examples/checkpoint_served.rs). Install it, or pass " +
-            "-PskipServedCheck to write an unchecked anchor.")
+    // rustAvailable, not "a cargo file exists": the rustup proxy is a file even
+    // when it cannot provide the pinned toolchain, and then exits 1 itself,
+    // which must not read as the probe's "not served".
+    if (!rustAvailable) {
+        throw GradleException("[refresh:$net] ${rustSkipNote ?: "cargo is not usable"}. A working cargo is " +
+            "needed to ask the pinned CL servers whether they serve the new anchor " +
+            "(rust/myotis-net/examples/checkpoint_served.rs). On a host without one, pass -PskipServedCheck " +
+            "to write the anchor without asking (the cross-validation still applies).")
     }
     logger.lifecycle("[refresh:$net] asking the pinned CL servers for a bootstrap at slot $slot (0x${root.take(8)}…)")
     val pb = ProcessBuilder(
@@ -2300,16 +2314,28 @@ fun checkpointServedByPins(
         "--example", "checkpoint_served", "--", "--net", net, "--slot", slot.toString(), "--root", root,
     ).directory(project.rootDir.resolve("rust")).redirectErrorStream(true)
     rustToolchainPath?.let { pb.environment()["PATH"] = it }
+    // The same rustflags as every other cargo task (see reproducibleRustEnv),
+    // so this build shares rust/target with cargoBuildHost instead of
+    // rebuilding the dependency graph in turn with it.
+    pb.environment().putAll(reproducibleRustEnv)
     val proc = pb.start()
     // cargo's own output (a compile error, a panic) is kept, and shown when the
     // probe did not give a verdict; the first release build can also take
     // minutes, so say so.
     logger.lifecycle("[refresh:$net] (the first run builds the probe in release mode, which can take minutes)")
     val other = mutableListOf<String>()
+    var probeSpoke = false
     proc.inputStream.bufferedReader().forEachLine { line ->
-        if (line.startsWith("[served]")) logger.lifecycle("[refresh:$net] $line") else { other += line; logger.info(line) }
+        if (line.startsWith("[served]")) {
+            probeSpoke = true
+            logger.lifecycle("[refresh:$net] $line")
+        } else { other += line; logger.info(line) }
     }
-    val code = proc.waitFor()
+    val exit = proc.waitFor()
+    // A verdict status counts only when the probe itself gave it: each of its
+    // verdict exits prints a [served] line first, and a 1 from cargo or rustup
+    // (a toolchain it cannot provide, a failed build) prints none.
+    val code = if (exit in setOf(0, 1, 3, 4) && !probeSpoke) -1 else exit
     if (code !in setOf(0, 1, 3, 4)) other.takeLast(40).forEach { logger.warn(it) }
     return when (code) {
         0 -> ServedVerdict.SERVED
@@ -2320,7 +2346,8 @@ fun checkpointServedByPins(
         }
         4 -> throw GradleException("[refresh:$net] no pinned CL server answered, so whether they serve slot " +
             "$slot is unknown; nothing written. Re-run, or pass -PskipServedCheck.")
-        else -> throw GradleException("[refresh:$net] the bootstrap check failed to run (exit $code); nothing written. " +
+        else -> throw GradleException("[refresh:$net] the bootstrap check failed to run (exit $exit" +
+            "${if (code == -1) ", with no verdict from the probe" else ""}; its output is above); nothing written. " +
             "Run it by hand: cd rust && cargo run --release -p myotis-net --example checkpoint_served -- " +
             "--net $net --slot $slot --root $root")
     }

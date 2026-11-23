@@ -16,7 +16,8 @@
 //! neighbours. The refresh only asks the checkpoint-sync servers, which answer
 //! for the chain, not for what a fresh install's servers can bootstrap.
 //!
-//! Each pin is asked the way `tests/live_pins_alive.rs` asks it: a cache miss
+//! Each pin is asked by the code `tests/live_pins_alive.rs` uses too
+//! (`probe_common/bootstrap_ask.rs`): a cache miss
 //! is retried, because roost answers ResourceUnavailable for an uncached root
 //! and fills it in the background; and an answer counts only if it passes the
 //! production acceptance: the served header hashes to the candidate root and
@@ -44,35 +45,27 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use libp2p::{Multiaddr, PeerId};
-use myotis_consensus::store::{LightClientProcessor, LightClientStore};
-use myotis_consensus::types::LightClientBootstrap;
-use myotis_net::codec;
-use myotis_net::protocols;
-use myotis_net::reqresp::{self, LocalStatus, RequestError};
+use myotis_net::reqresp::{self, LocalStatus};
 use myotis_net::status::StatusMessage;
 use myotis_net::ChainConfig;
 
-/// Per-request budget, as in `live_pins_alive`.
-const PIN_TIMEOUT: Duration = Duration::from_secs(20);
-/// Miss retries, as in `live_pins_alive`: one roost refresh tick plus headroom.
-const MISS_RETRIES: usize = 2;
-const MISS_BACKOFF: Duration = Duration::from_secs(15);
+// The ask itself — request, miss retries, production acceptance — is shared
+// with the release check `tests/live_pins_alive.rs`, so the two cannot drift.
+#[path = "probe_common/bootstrap_ask.rs"]
+mod bootstrap_ask;
+use bootstrap_ask::{ask_bootstrap, NotServed};
+
 /// The same floor as the release check: two is the smallest number that is
 /// not a single point of failure. Applied to the pins that answered.
 const MIN_SERVING_PINS: usize = 2;
 /// How long a pin that refused the dial waits before its one more try.
 const UNREACHABLE_RETRY: Duration = Duration::from_secs(30);
 
-/// Why a pin did not serve the root: it answered without it, or it could not
-/// be reached at all (which says nothing about the root).
-enum Miss {
-    Answered(String),
-    Unreachable(String),
-}
-
 fn usage(msg: &str) -> ! {
     eprintln!("checkpoint_served: {msg}");
-    eprintln!("usage: checkpoint_served --net <mainnet|sepolia|gnosis|chiado> --slot <n> --root <64 hex>");
+    eprintln!(
+        "usage: checkpoint_served --net <mainnet|sepolia|gnosis|chiado> --slot <n> --root <64 hex>"
+    );
     std::process::exit(2);
 }
 
@@ -102,89 +95,6 @@ fn split_pin(pin: &str) -> Option<(Multiaddr, PeerId)> {
     Some((addr, peer?))
 }
 
-/// Ask one pin, retrying a cache miss. `Ok(())` when it served a bootstrap that
-/// passes the production acceptance for `root`; otherwise why not.
-async fn ask(
-    client: &reqresp::ReqRespClient,
-    config: &ChainConfig,
-    peer: PeerId,
-    addr: &Multiaddr,
-    root: [u8; 32],
-) -> Result<(), Miss> {
-    // The last REAL answer this pin gave. A retry that then fails at the
-    // transport level (Nimbus refuses quick reconnects) must not turn an
-    // earlier "not available" into "unreachable".
-    let mut last_answer: Option<Vec<u8>> = None;
-    for attempt in 0..=MISS_RETRIES {
-        if attempt > 0 {
-            eprintln!("[served] .... {addr} retrying after a miss ({attempt}/{MISS_RETRIES})");
-            tokio::time::sleep(MISS_BACKOFF).await;
-        }
-        let req = codec::encode_request(&root);
-        match tokio::time::timeout(
-            PIN_TIMEOUT,
-            client.request_raw(peer, addr.clone(), protocols::BOOTSTRAP, req),
-        )
-        .await
-        {
-            Ok(Ok(raw)) => {
-                // Only ResourceUnavailable (roost's cache miss) is worth
-                // retrying; decided on the result code, never on the length.
-                let miss = raw.first() == Some(&codec::RESULT_RESOURCE_UNAVAILABLE);
-                last_answer = Some(raw);
-                if !miss {
-                    break;
-                }
-            }
-            // Only a dial that never reached the peer says nothing about the
-            // root (Shutdown is this process's own side). Everything else
-            // reached a connection: a timeout, a closed stream or a refused
-            // protocol is the pin's answer, as `request_raw_at` documents.
-            Ok(Err(RequestError::DialFailure | RequestError::Shutdown)) => {
-                if last_answer.is_some() {
-                    break;
-                }
-                return Err(Miss::Unreachable("dial failed".to_string()));
-            }
-            Ok(Err(e)) => {
-                if last_answer.is_some() {
-                    break;
-                }
-                return Err(Miss::Answered(e.to_string()));
-            }
-            // Our own budget ran out: count it against the root. A trust
-            // anchor gate errs towards refusing; the walk then moves on.
-            Err(_) => {
-                if last_answer.is_some() {
-                    break;
-                }
-                return Err(Miss::Answered(format!("no answer within {}s", PIN_TIMEOUT.as_secs())));
-            }
-        }
-    }
-    let raw = last_answer.expect("every path that reaches here stored an answer");
-    let answered = |why: String| Miss::Answered(why);
-    if let Some((code, msg)) = codec::leading_error(&raw) {
-        return Err(answered(format!("result code {code} {msg:?}")));
-    }
-    let d = codec::decode_response(&raw, true).map_err(|e| answered(format!("undecodable answer: {e}")))?;
-    if d.ssz_payload.is_empty() {
-        return Err(answered("empty payload".to_string()));
-    }
-    let fork = config.lc_fork_of_chunk(&d.fork_digest, d.ssz_payload.len(), LightClientBootstrap::GLOAS_SIZE);
-    let b = LightClientBootstrap::decode_for(fork, &d.ssz_payload)
-        .map_err(|e| answered(format!("bootstrap did not decode: {e}")))?;
-    if b.header.beacon.hash_tree_root() != root {
-        return Err(answered("served a bootstrap for another root".to_string()));
-    }
-    let processor = LightClientProcessor::new(
-        LightClientStore::new(config.slots_per_period()),
-        config.fork_schedule.clone(),
-        config.genesis_validators_root,
-    );
-    processor.verify_bootstrap(&b).map_err(|reason| answered(reason.to_string()))
-}
-
 #[tokio::main]
 async fn main() {
     let mut net = None;
@@ -199,10 +109,10 @@ async fn main() {
             other => usage(&format!("unknown argument {other:?}")),
         }
     }
-    for var in ["MYOTIS_CL_STATIC_PEERS", "MYOTIS_CL_DISABLE_DISCV5"] {
-        if std::env::var_os(var).is_some() {
-            usage(&format!("{var} is set: it replaces the shipped pin list, so the answer would not be about the pins this build ships"));
-        }
+    // Only the pin-list override matters here: the probe never reads the
+    // bootnodes MYOTIS_CL_DISABLE_DISCV5 clears.
+    if std::env::var_os("MYOTIS_CL_STATIC_PEERS").is_some() {
+        usage("MYOTIS_CL_STATIC_PEERS is set: it replaces the shipped pin list, so the answer would not be about the pins this build ships");
     }
     let mut config = match net.as_deref() {
         Some("mainnet") => ChainConfig::mainnet(),
@@ -217,7 +127,10 @@ async fn main() {
         Some(Err(_)) => usage("--slot must be a number"),
         None => usage("--slot is required"),
     };
-    let root = parse_root(root.as_deref().unwrap_or_else(|| usage("--root is required")));
+    let root = parse_root(
+        root.as_deref()
+            .unwrap_or_else(|| usage("--root is required")),
+    );
     let net = net.expect("matched above");
 
     if config.static_peers.is_empty() {
@@ -249,14 +162,22 @@ async fn main() {
     let mut answered = 0usize;
     let mut unreachable = Vec::new();
     for round in 0..2 {
-        let todo: Vec<String> = if round == 0 { pins.clone() } else { std::mem::take(&mut unreachable) };
+        let todo: Vec<String> = if round == 0 {
+            pins.clone()
+        } else {
+            std::mem::take(&mut unreachable)
+        };
         if todo.is_empty() {
             break;
         }
         if round > 0 {
             // A pin that refused the dial gets one more try, later: Sepolia's
             // Nimbus refuses a quick reconnect from the same address.
-            eprintln!("[served] .... {} pin(s) unreachable; one more try in {}s", todo.len(), UNREACHABLE_RETRY.as_secs());
+            eprintln!(
+                "[served] .... {} pin(s) unreachable; one more try in {}s",
+                todo.len(),
+                UNREACHABLE_RETRY.as_secs()
+            );
             tokio::time::sleep(UNREACHABLE_RETRY).await;
         }
         for pin in &todo {
@@ -264,17 +185,21 @@ async fn main() {
                 eprintln!("[served] BAD  {pin} — unparseable, or no /p2p/ peer id");
                 continue;
             };
-            match ask(&client, &config, peer, &addr, root).await {
-                Ok(()) => {
+            match ask_bootstrap(&client, &config, peer, &addr, root, "[served]").await {
+                Ok(_) => {
                     serving += 1;
                     answered += 1;
                     eprintln!("[served] OK   {addr}");
                 }
-                Err(Miss::Answered(why)) => {
+                Err(
+                    NotServed::NoAnswer(why)
+                    | NotServed::Unavailable(why)
+                    | NotServed::Invalid(why),
+                ) => {
                     answered += 1;
                     eprintln!("[served] NO   {addr} — {why}");
                 }
-                Err(Miss::Unreachable(why)) => {
+                Err(NotServed::Unreachable(why)) => {
                     eprintln!("[served] DOWN {addr} — {why} (says nothing about the root)");
                     unreachable.push(pin.clone());
                 }

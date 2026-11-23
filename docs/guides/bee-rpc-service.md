@@ -47,7 +47,9 @@ its deployment block:
 ## Setup
 
 1. **Refresh the trust anchor** (multi-operator checkpoint — refuses a root
-   fewer than two operators agree on):
+   fewer than two operators agree on, or one the pinned CL servers cannot
+   serve; that second check needs cargo, so on a host without it add
+   `-PskipServedCheck`):
 
    ```bash
    ./gradlew refreshCheckpoint -Pnetwork=gnosis
