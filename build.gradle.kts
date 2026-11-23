@@ -698,7 +698,13 @@ configure(subprojects.filter { it.name in publishedArtifactIds }) {
         repositories {
             maven {
                 name = "GitHubPackages"
-                url = uri("https://maven.pkg.github.com/biafra23/myotis")
+                // The repository this build publishes from: Actions names it in GITHUB_REPOSITORY
+                // (VesperBats/myotis since the move; the old biafra23/myotis path answers 404 to a
+                // publish, which skipped v0.1.21's whole engine-library publication). Lowercase,
+                // as GitHub's Maven registry documents the owner in its URLs.
+                val packagesRepo = (System.getenv("GITHUB_REPOSITORY")?.takeIf { it.isNotBlank() }
+                    ?: "VesperBats/myotis").lowercase()
+                url = uri("https://maven.pkg.github.com/$packagesRepo")
                 // Actions supplies both (packages: write on the job); a maintainer
                 // publishing by hand exports a classic PAT with write:packages
                 // under the same two names. Unset everywhere else, which only a
