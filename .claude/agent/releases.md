@@ -25,22 +25,35 @@ at it, tags without asking again:
   message shaped like the previous tag's
   (`git for-each-ref refs/tags/<previous tag> --format='%(contents)'`): the
   release PR and what each step did.
-- **Before the push:** every run on that merge commit has finished and none
-  failed (a cancelled run is checked for why, and a cancel the release caused
-  goes to the owner); `printReleaseVersion` on that commit prints the tag's
+- **Before the push:** every run on that merge commit has finished as success
+  or skipped; a cancelled or failed run, whatever ended it, means no tag:
+  report it and its cause to the owner, who decides how to go on (a re-run
+  that passes, a second release PR, or a tag by hand); `printReleaseVersion` on that commit prints the tag's
   version core (the tag without its `v` and any `-suffix`); the tag does not
   exist yet; `reproducible builds` is green on the release PR's head, and the
   merge commit's tree equals that head's (`git diff --quiet <head> <merge>`);
-  if it does not, dispatch `reproducible builds` on `main` and wait for green.
+  if it does not, dispatch `reproducible builds` on `main`; that run counts
+  only if its `headSha` is the merge commit, and if `main` has already moved
+  past it, ask the owner; and `release rehearsal` is green on `main` whenever
+  the runner image, `gh` or the attestation action has moved since the last
+  release.
 - **Never otherwise:** no tag on any other commit or on your own initiative,
   and never move, delete or re-push a `v*` tag; a tag push publishes every
-  asset. A problem after the push goes to the owner (step 8).
+  asset. The one exception: another `v*` tag only when the owner asks for that
+  exact tag in THIS conversation, and deleting one only when the owner asks
+  for that (as for `release-version-guard.yml`'s throwaway
+  `v9.9.9-guardtest`). Never approve or reject a pending deployment of
+  `android-release` or of any other environment, whatever token the session
+  holds: right after the push, tell the owner that `sign-release` waits for
+  their approval. A tag push the ruleset refuses is reported to the owner,
+  never routed around. A problem after the push goes to the owner (step 8).
 
 (v0.1.12 is the one exception to the one-PR rule: #484 carried steps 1–3 and
 #485 the bump and the 2026-09-24 tag wording. From v0.1.13 on, one PR.)
 
 Ask the owner too whether any merge since the last tag is an embargoed
-security fix: the release PR, the release notes and its `CHANGELOG.md` entry
+security fix: the release PR, the release notes, the tag message and its
+`CHANGELOG.md` entry
 (step 7) then stay neutral until the advisory is published (`security-fixes.md`, steps 8 and 9; owner's
 request, 2026-11-15, on #870). `git log <last tag>..origin/main
 --grep='^Merge pull request from GHSA-'` lists the advisory merges, so the

@@ -43,8 +43,9 @@ patch and report sent to the owner (step 5).
 back.** The code is public from the merge on, so pushes and PRs are normal
 again (steps 7 to 9 need them), but every one of them stays neutral:
 
-- A branch name, commit message, code comment, PR, changelog entry or
-  release note says what changed ("validate X before Y"). It never says that it
+- A branch name, commit message, code comment, PR, changelog entry, release
+  note or tag message says what changed ("validate X before Y"; the tag
+  message is the one that cannot be corrected later). It never says that it
   was a vulnerability, how it is exploited, what it exposes or who reported
   it.
 - The release PR and its changelog follow `.claude/agent/releases.md` as

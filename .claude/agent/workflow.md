@@ -96,7 +96,8 @@ terminal, CI) there is no session title and this rule is inapplicable.
 Owner's decision, 2026-11-23, made after the 2026-09-24 tag wording
 (`de70cb49`, in #485) changed who tags without the owner deciding it: it came
 in as the fix of a review finding. It covers the project rules (`CLAUDE.md`,
-everything under `.claude/agent/`, `.github/claude-review-prompt.md`) and
+everything under `.claude/agent/`, `.github/claude-review-prompt.md`,
+`.github/workflows/claude-review.yml`) and
 architecture: the module layout and the host ↔ engine line with its
 exemptions that `architecture.md` describes.
 
@@ -114,7 +115,9 @@ exemptions that `architecture.md` describes.
 
 It covers new, removed and reworded rules, and every "clarification" that
 fills a gap (naming an actor the rule left unnamed is one). Only a verbatim
-move needs no question; the PR says it is verbatim. A review comment proposing
+move needs no question; the PR says it is verbatim. A reference that a rename
+in the same PR forces (the old path no longer exists) needs no question
+either; the PR lists each one. A review comment proposing
 a rule change is answered *Deferred* and becomes such a question; it is never
 applied first.
 

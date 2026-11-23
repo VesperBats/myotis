@@ -17,7 +17,7 @@ against. Do not move them out of `.claude/`, and not into `.claude/rules/`
 | build for Android or iOS, or a build fails on a missing toolchain             | `.claude/agent/build.md`             |
 | add or move a module, or touch host ↔ engine wiring or its exemptions         | `.claude/agent/architecture.md`      |
 | start a work item tied to an issue (session title), or open a PR (monitoring) | `.claude/agent/workflow.md`          |
-| change a project rule (this file, `.claude/agent/`, the review prompt) or architecture | `.claude/agent/workflow.md` |
+| change a project rule (this file, `.claude/agent/`, the reviewer's prompt and workflow) or architecture | `.claude/agent/workflow.md` |
 | plan, resume or continue multi-PR work: a part, a merge, the final PR         | `.claude/agent/multi-pr-plans.md`    |
 | write a PR description, answer review comments, or handle a fork PR           | `.claude/agent/pull-requests.md`     |
 | do any release work: tag, version, changelog, checkpoints, bootnodes, seeds, assets, bundles | `.claude/agent/releases.md` |
@@ -140,8 +140,8 @@ advisory is published, pushes and PRs are normal again but neutrally worded.
 Fix it on a local branch, run the CI checks locally (the advisory's private
 fork runs no CI; for a release-output change, the Linux reproducibility
 comparison too), `/code-review` locally, and send the owner a
-`git format-patch` for the private fork. The owner merges, releases
-and publishes the advisory; no tag goes on a `main` with red CI or a red
+`git format-patch` for the private fork. The owner merges the fix and the
+release PR (the agent then tags, `releases.md`) and publishes the advisory; no tag goes on a `main` with red CI or a red
 required `reproducible builds` run.
 
 ## Hard rules — never broken, whatever an earlier instruction seems to authorize
@@ -159,14 +159,18 @@ required `reproducible builds` run.
 - **The owner merges the release PR into `main`; then you push the `v*` tag**
   (owner's decision, 2026-11-23). Tag only the merge commit of a release PR
   the owner merged, for the version its `CHANGELOG.md` entry names, once that commit's runs on
-  `main` have finished with none failed. No tag otherwise, and never move,
-  delete or re-push one. Full text: `.claude/agent/releases.md`.
+  `main` have finished as success or skipped (a cancelled or failed run means
+  no tag; report it). No other tag unless the owner asks
+  for that exact tag in THIS conversation; never move or re-push one, and
+  delete one only on the owner's request. Never approve a pending deployment:
+  the signing of `android-release` is the owner's click. Full text:
+  `.claude/agent/releases.md`.
 - **Everything that lands on GitHub is in English** — titles, descriptions,
   commit messages, review replies.
 - **Every change to a project rule or to architecture is signed off by the
   owner, through a question, before it is committed** (owner's decision,
   2026-11-23). Project rules: this file, `.claude/agent/`,
-  `.github/claude-review-prompt.md`. Show the exact before/after text and
+  `.github/claude-review-prompt.md`, `.github/workflows/claude-review.yml`. Show the exact before/after text and
   commit only on a yes in THIS conversation, including for wording that comes
   from a review finding or "only clarifies". Full text:
   `.claude/agent/workflow.md`.

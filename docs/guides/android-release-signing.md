@@ -99,8 +99,10 @@ file is missing.
    machine act with your own `gh` token, which can also push tags and approve a
    pending deployment through the API. So these stop other collaborators and
    stray tags; against a session holding your token, they rest on CLAUDE.md's
-   rule that agents never push a `v*` tag. Closing that too means giving agents
-   a credential of their own, without tag or approval rights.
+   rules: an agent pushes a `v*` tag only on the merge commit of a release PR
+   you merged, and never approves or rejects a pending deployment, so every
+   signing still waits for your click. Closing that too means giving agents a
+   credential of their own, with tag rights but no approval rights.
 
 3. **Store the secrets in that environment**, not as repository secrets. `gh`
    prompts for each value, so a password never lands in your shell history:
