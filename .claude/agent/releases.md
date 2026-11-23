@@ -184,7 +184,7 @@ question does not rest on memory.
    the v0.1.12 checkpoint PR (#484) followed this list to the letter, answered
    the three questions, and shipped no bump — `main` still declared 0.1.11, and
    the tag would have been refused. There is no command for it yet (review
-   follow-up: a `setReleaseVersion` task); until there is, it is these six
+   follow-up: a `setReleaseVersion` task); until there is, it is these seven
    files (a previous sweep commit touches these plus step 1's two checkpoint
    files, so do not copy its file list blindly):
 
@@ -193,7 +193,7 @@ question does not rest on memory.
    | `build.gradle.kts` | `version = "X.Y.Z-SNAPSHOT"` (root `allprojects`) |
    | `rust/Cargo.toml` | the workspace `version` |
    | `ios-app/Myotis/Version.xcconfig` | `MARKETING_VERSION = X.Y.Z` and `CURRENT_PROJECT_VERSION` = the root build's `releaseBuildNumber`, i.e. `X*1_000_000 + Y*1_000 + Z` (0.1.12 → 1012, 0.2.0 → 2000, 1.0.0 → 1000000; `verifyIosVersion` prints the expected value on a mismatch) |
-   | `rust/Cargo.lock`, `rust/roost/Cargo.lock`, `rust/tor-poc/Cargo.lock` | `cargo update --workspace` in each of the three manifests, so the workspace crates' own entries follow |
+   | `rust/Cargo.lock`, `rust/roost/Cargo.lock`, `rust/tor-poc/Cargo.lock`, `rust/swarm/Cargo.lock` | `cargo update --workspace` in each of the four manifests, so the workspace crates' own entries follow |
 
    And, ONLY when step 3's deep walk (3c) ran from `oldest-servable.properties`'
    entries — the dispatched workflow's default, not the `pins-only` scope and
@@ -207,13 +207,13 @@ question does not rest on memory.
 
    ```bash
    ./gradlew -q :printReleaseVersion verifyCrateVersions verifyIosVersion   # must print releaseVersion=X.Y.Z
-   for m in rust rust/roost rust/tor-poc; do cargo update --workspace --locked --manifest-path $m/Cargo.toml; done
+   for m in rust rust/roost rust/tor-poc rust/swarm; do cargo update --workspace --locked --manifest-path $m/Cargo.toml; done
    ```
 
    `releaseVersion` must equal the tag's version core — the guard accepts
    `vX.Y.Z` and `vX.Y.Z-<suffix>` (rc/hotfix shapes), nothing else. Know what
    catches what: the guard refuses the tag ONLY for the Gradle pin, because it
-   compares the tag to `project.version` and nothing more. The other five are
+   compares the tag to `project.version` and nothing more. The other six are
    PR-time failures — `./gradlew check` for the crate and iOS pins, the
    `cargo-locks` workflow for the locks — so run them before asking for the
    merge, or the release PR goes red after the fact. A stale `rust/Cargo.toml`
