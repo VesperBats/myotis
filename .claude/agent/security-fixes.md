@@ -43,8 +43,9 @@ patch and report sent to the owner (step 5).
 back.** The code is public from the merge on, so pushes and PRs are normal
 again (steps 7 to 9 need them), but every one of them stays neutral:
 
-- A branch name, commit message, code comment, PR, changelog entry or
-  release note says what changed ("validate X before Y"). It never says that it
+- A branch name, commit message, code comment, PR, changelog entry, release
+  note or tag message says what changed ("validate X before Y"; the tag
+  message is the one that cannot be corrected later). It never says that it
   was a vulnerability, how it is exploited, what it exposes or who reported
   it.
 - The release PR and its changelog follow `.claude/agent/releases.md` as
@@ -147,7 +148,8 @@ again (steps 7 to 9 need them), but every one of them stays neutral:
    `main`, in the neutral wording above. No `v*` tag goes on a commit whose
    runs are red.
 8. **Release.** The release follows `.claude/agent/releases.md` as usual, in
-   the neutral wording above. The tag is the owner's action. The fix's PR
+   the neutral wording above. The owner merges the release PR; the agent
+   then tags as in `releases.md`. The fix's PR
    lives in the advisory's fork, so its `CHANGELOG.md` entry has no PR
    number to cite; it cites the merge commit instead.
 9. **Publish.** Publishing the advisory, and requesting a CVE for it, are the

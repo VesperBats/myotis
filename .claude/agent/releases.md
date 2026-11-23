@@ -12,15 +12,48 @@ below, mandatory, never asked about** (owner ruling, 2026-09-24) — and
 **refresh the PoC seeds, step 5** — suspended, see the step (owner's decision, 2026-11-22) — and **add the
 release to `CHANGELOG.md`, step 7, mandatory as well** (owner's request,
 2026-11-15) — and **extend the checkpoint tables, step 6, mandatory too**
-(owner's decision D1, 2026-11-20). Everything a release needs goes into ONE release PR. **The tag is the owner's action**: after
-the merge the owner pushes it, or explicitly asks for it to be pushed — never
-push a `v*` tag on your own initiative, it is the publish trigger for every
-asset workflow and a stronger action than the merge this file already forbids.
+(owner's decision D1, 2026-11-20). Everything a release needs goes into ONE release PR.
+
+**The owner merges the release PR into `main`; the agent then pushes the tag**
+(owner's decision, 2026-11-23; it replaces the 2026-09-24 wording "the tag is
+the owner's action", which the owner had not decided). Once the owner has
+merged the release PR, the session that prepared it, or one the owner points
+at it, tags without asking again:
+
+- **What:** an annotated `vX.Y.Z[-suffix]` tag on the release PR's merge
+  commit, for exactly the version its `CHANGELOG.md` entry names, with a
+  message shaped like the previous tag's
+  (`git for-each-ref refs/tags/<previous tag> --format='%(contents)'`): the
+  release PR and what each step did.
+- **Before the push:** every run on that merge commit has finished as success
+  or skipped; a cancelled or failed run, whatever ended it, means no tag:
+  report it and its cause to the owner, who decides how to go on (a re-run
+  that passes, a second release PR, or a tag by hand); `printReleaseVersion` on that commit prints the tag's
+  version core (the tag without its `v` and any `-suffix`); the tag does not
+  exist yet; `reproducible builds` is green on the release PR's head, and the
+  merge commit's tree equals that head's (`git diff --quiet <head> <merge>`);
+  if it does not, dispatch `reproducible builds` on `main`; that run counts
+  only if its `headSha` is the merge commit, and if `main` has already moved
+  past it, ask the owner; and `release rehearsal` is green on `main` whenever
+  the runner image, `gh` or the attestation action has moved since the last
+  release.
+- **Never otherwise:** no tag on any other commit or on your own initiative,
+  and never move, delete or re-push a `v*` tag; a tag push publishes every
+  asset. The one exception: another `v*` tag only when the owner asks for that
+  exact tag in THIS conversation, and deleting one only when the owner asks
+  for that (as for `release-version-guard.yml`'s throwaway
+  `v9.9.9-guardtest`). Never approve or reject a pending deployment of
+  `android-release` or of any other environment, whatever token the session
+  holds: right after the push, tell the owner that `sign-release` waits for
+  their approval. A tag push the ruleset refuses is reported to the owner,
+  never routed around. A problem after the push goes to the owner (step 8).
+
 (v0.1.12 is the one exception to the one-PR rule: #484 carried steps 1–3 and
-#485 the bump and this rule. From v0.1.13 on, one PR.)
+#485 the bump and the 2026-09-24 tag wording. From v0.1.13 on, one PR.)
 
 Ask the owner too whether any merge since the last tag is an embargoed
-security fix: the release PR, the release notes and its `CHANGELOG.md` entry
+security fix: the release PR, the release notes, the tag message and its
+`CHANGELOG.md` entry
 (step 7) then stay neutral until the advisory is published (`security-fixes.md`, steps 8 and 9; owner's
 request, 2026-11-15, on #870). `git log <last tag>..origin/main
 --grep='^Merge pull request from GHSA-'` lists the advisory merges, so the
@@ -151,7 +184,7 @@ question does not rest on memory.
    the v0.1.12 checkpoint PR (#484) followed this list to the letter, answered
    the three questions, and shipped no bump — `main` still declared 0.1.11, and
    the tag would have been refused. There is no command for it yet (review
-   follow-up: a `setReleaseVersion` task); until there is, it is these six
+   follow-up: a `setReleaseVersion` task); until there is, it is these seven
    files (a previous sweep commit touches these plus step 1's two checkpoint
    files, so do not copy its file list blindly):
 
@@ -160,7 +193,7 @@ question does not rest on memory.
    | `build.gradle.kts` | `version = "X.Y.Z-SNAPSHOT"` (root `allprojects`) |
    | `rust/Cargo.toml` | the workspace `version` |
    | `ios-app/Myotis/Version.xcconfig` | `MARKETING_VERSION = X.Y.Z` and `CURRENT_PROJECT_VERSION` = the root build's `releaseBuildNumber`, i.e. `X*1_000_000 + Y*1_000 + Z` (0.1.12 → 1012, 0.2.0 → 2000, 1.0.0 → 1000000; `verifyIosVersion` prints the expected value on a mismatch) |
-   | `rust/Cargo.lock`, `rust/roost/Cargo.lock`, `rust/tor-poc/Cargo.lock` | `cargo update --workspace` in each of the three manifests, so the workspace crates' own entries follow |
+   | `rust/Cargo.lock`, `rust/roost/Cargo.lock`, `rust/tor-poc/Cargo.lock`, `rust/swarm/Cargo.lock` | `cargo update --workspace` in each of the four manifests, so the workspace crates' own entries follow |
 
    And, ONLY when step 3's deep walk (3c) ran from `oldest-servable.properties`'
    entries — the dispatched workflow's default, not the `pins-only` scope and
@@ -174,13 +207,13 @@ question does not rest on memory.
 
    ```bash
    ./gradlew -q :printReleaseVersion verifyCrateVersions verifyIosVersion   # must print releaseVersion=X.Y.Z
-   for m in rust rust/roost rust/tor-poc; do cargo update --workspace --locked --manifest-path $m/Cargo.toml; done
+   for m in rust rust/roost rust/tor-poc rust/swarm; do cargo update --workspace --locked --manifest-path $m/Cargo.toml; done
    ```
 
    `releaseVersion` must equal the tag's version core — the guard accepts
    `vX.Y.Z` and `vX.Y.Z-<suffix>` (rc/hotfix shapes), nothing else. Know what
    catches what: the guard refuses the tag ONLY for the Gradle pin, because it
-   compares the tag to `project.version` and nothing more. The other five are
+   compares the tag to `project.version` and nothing more. The other six are
    PR-time failures — `./gradlew check` for the crate and iOS pins, the
    `cargo-locks` workflow for the locks — so run them before asking for the
    merge, or the release PR goes red after the fact. A stale `rust/Cargo.toml`
@@ -259,7 +292,7 @@ question does not rest on memory.
    of the SAME release PR** (owner's request, 2026-11-15, mirroring Punicus
    #281). `CHANGELOG.md` follows Keep a Changelog. The release PR turns
    `## [Unreleased]` into `## [X.Y.Z] - <date>` (the exact version of the tag
-   the owner will push, its suffix included for a release candidate such as
+   the agent will push after the owner's merge, its suffix included for a release candidate such as
    `0.1.21-rc1`; when the tag's shape is still open, ask the owner which tag it
    will be), starts a new empty `## [Unreleased]` above it, and updates the
    compare links at the bottom (`[X.Y.Z]` compares the previous tag with
