@@ -297,9 +297,9 @@ public record NetworkConfig(
             // genesis_validators_root (sepolia)
             Bytes.fromHexString("d8ea171f3c94aea21ebc42a1ed61052acf3f9209c00e4efbaaddac09ed9b8078").toArrayUnsafe(),
             // @checkpoint:sepolia:begin — managed by `./gradlew refreshCheckpoint`
-            // trusted checkpoint: recent finalized sepolia block root (slot 11640768, 2026-11-23, period 1420)
-            Bytes.fromHexString("eb5d81b59e2abe82d7c6dfd4caa0570c33d11599a8ca237d07016b42e2fc6dde").toArrayUnsafe(),
-            11640768L, // checkpoint slot (epoch = slot/32). Must stay in sync with the root above.
+            // trusted checkpoint: recent finalized sepolia block root (slot 11632064, 2026-11-22, period 1419)
+            Bytes.fromHexString("751022ba9937712663e0df63c0f20879c91945c269239cab350bd7b209760ebb").toArrayUnsafe(),
+            11632064L, // checkpoint slot (epoch = slot/32). Must stay in sync with the root above.
             // @checkpoint:sepolia:end
             // Fork schedule — eth-clients/sepolia metadata/config.yaml *_FORK_EPOCH /
             // *_FORK_VERSION. Fulu (0x90000075) activated at epoch 272640 (2025-10-14);

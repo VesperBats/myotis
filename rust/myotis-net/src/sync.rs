@@ -479,11 +479,11 @@ impl ChainConfig {
             // serving node's trustedNodeSync point, or that node cannot answer
             // the bootstrap for it (docs/guides/dedicated-sepolia-node.md §5).
             // @checkpoint:sepolia:begin — managed by `./gradlew refreshCheckpoint`
-            // trusted checkpoint: recent finalized sepolia block root (slot 11640768, 2026-11-23, period 1420)
+            // trusted checkpoint: recent finalized sepolia block root (slot 11632064, 2026-11-22, period 1419)
             checkpoint_root: hex32(
-                "eb5d81b59e2abe82d7c6dfd4caa0570c33d11599a8ca237d07016b42e2fc6dde",
+                "751022ba9937712663e0df63c0f20879c91945c269239cab350bd7b209760ebb",
             ),
-            checkpoint_slot: 11_640_768,
+            checkpoint_slot: 11_632_064,
             // @checkpoint:sepolia:end
             static_peers: SEPOLIA_STATIC_PEERS.iter().map(|s| s.to_string()).collect(),
             bootstrap_enrs: SEPOLIA_BOOTSTRAP_ENRS.iter().map(|s| s.to_string()).collect(),
@@ -5159,10 +5159,10 @@ mod tests {
         assert_eq!(sig(11_296_768), [0x90, 0x00, 0x00, 0x75]);
         assert_eq!(sig(11_296_769), [0x90, 0x00, 0x00, 0x76]);
         // @checkpoint:sepolia:test:begin — managed by `./gradlew refreshCheckpoint`
-        assert_eq!(c.checkpoint_slot, 11_640_768);
+        assert_eq!(c.checkpoint_slot, 11_632_064);
         assert_eq!(
             hex_str(&c.checkpoint_root),
-            "eb5d81b59e2abe82d7c6dfd4caa0570c33d11599a8ca237d07016b42e2fc6dde"
+            "751022ba9937712663e0df63c0f20879c91945c269239cab350bd7b209760ebb"
         );
         // @checkpoint:sepolia:test:end
         assert_eq!(

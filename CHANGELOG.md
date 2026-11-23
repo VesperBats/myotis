@@ -38,9 +38,11 @@ its trust anchors and release checks.
 ### Changed
 
 - Engine ABI 60 (unchanged from 0.1.21).
-- Trust anchors: the embedded checkpoints of mainnet, Gnosis and Sepolia
-  moved to 2026-11-23 (mainnet slot 15,716,544) in the Java and Rust engines,
-  and mainnet's in the Go engine too; the checkpoint table extends to block
+- Trust anchors: the embedded checkpoints of mainnet and Gnosis moved to
+  2026-11-23 (mainnet slot 15,716,544) in the Java and Rust engines, and
+  mainnet's in the Go engine too. Sepolia keeps v0.1.21's anchor (slot
+  11,632,064): neither pinned Sepolia server served the newer one. The
+  checkpoint table extends to block
   26,476,643, cross-checked against a second node. The mainnet bootnodes still
   equal go-ethereum's.
 
