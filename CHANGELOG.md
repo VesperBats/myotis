@@ -19,6 +19,13 @@ its trust anchors and release checks.
 
 ## [Unreleased]
 
+### Fixed
+
+- Engine library: publishing to GitHub Packages failed with HTTP 404 after the
+  repository moved to `VesperBats/myotis`; the publish URL, and the one in the
+  Android library guide, now name the new location. v0.1.21 is not on GitHub
+  Packages; it is on the `maven-repo` branch and attached to its release.
+
 ## [0.1.21] - 2026-11-22
 
 ### Added

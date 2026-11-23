@@ -698,7 +698,7 @@ configure(subprojects.filter { it.name in publishedArtifactIds }) {
         repositories {
             maven {
                 name = "GitHubPackages"
-                url = uri("https://maven.pkg.github.com/biafra23/myotis")
+                url = uri("https://maven.pkg.github.com/VesperBats/myotis")
                 // Actions supplies both (packages: write on the job); a maintainer
                 // publishing by hand exports a classic PAT with write:packages
                 // under the same two names. Unset everywhere else, which only a
