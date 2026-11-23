@@ -82,7 +82,8 @@ that produced this note.
     review that is mistaken.
   - *Deferred* — say who decides and what the options are. Use this for
     anything that amends a project rule (this file included) or changes
-    architecture; those are the owner's call, not the PR author's.
+    architecture; those are the owner's call, not the PR author's, and put
+    to the owner as a sign-off question (`workflow.md`).
 - **Do not mark a thread resolved on the author's own say-so.** Leave that to
   the reviewer or the owner.
 - Reply with

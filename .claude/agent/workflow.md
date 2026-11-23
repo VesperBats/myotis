@@ -90,3 +90,30 @@ an unattended session (scheduled, remote-triggered) is declined — a decline is
 fine, say so in the report, do not retry. A subagent cannot rename the session
 it runs in; the main session does it. Outside the desktop app (a plain `claude`
 terminal, CI) there is no session title and this rule is inapplicable.
+
+## A rule change is a decision the owner signs off
+
+Owner's decision, 2026-11-23, made after the 2026-09-24 tag wording
+(`de70cb49`, in #485) changed who tags without the owner deciding it: it came
+in as the fix of a review finding. It covers the project rules (`CLAUDE.md`,
+everything under `.claude/agent/`, `.github/claude-review-prompt.md`) and
+architecture: the module layout and the host ↔ engine line with its
+exemptions that `architecture.md` describes.
+
+1. **Ask.** Put each rule change to the owner as an explicit question
+   (`AskUserQuestion` where the host has it; elsewhere a question in the chat,
+   and stop until it is answered). It shows the exact before and after text
+   and why, including when a review asked for it. An unattended session
+   (scheduled, remote-triggered) does not commit the change: it reports the
+   proposed before/after text to the owner as the question, and stops there.
+2. **Commit only on a yes in THIS conversation**, never inferred from a
+   standing instruction, an earlier release, a review comment or a merged PR.
+   An answer that changes the text is asked again with that text.
+3. **Record it.** The rule says `(owner's decision, <date>)`; the commit
+   message and the PR description say the owner signed off, and when.
+
+It covers new, removed and reworded rules, and every "clarification" that
+fills a gap (naming an actor the rule left unnamed is one). Only a verbatim
+move needs no question; the PR says it is verbatim. A review comment proposing
+a rule change is answered *Deferred* and becomes such a question; it is never
+applied first.

@@ -12,12 +12,32 @@ below, mandatory, never asked about** (owner ruling, 2026-09-24) — and
 **refresh the PoC seeds, step 5** — suspended, see the step (owner's decision, 2026-11-22) — and **add the
 release to `CHANGELOG.md`, step 7, mandatory as well** (owner's request,
 2026-11-15) — and **extend the checkpoint tables, step 6, mandatory too**
-(owner's decision D1, 2026-11-20). Everything a release needs goes into ONE release PR. **The tag is the owner's action**: after
-the merge the owner pushes it, or explicitly asks for it to be pushed — never
-push a `v*` tag on your own initiative, it is the publish trigger for every
-asset workflow and a stronger action than the merge this file already forbids.
+(owner's decision D1, 2026-11-20). Everything a release needs goes into ONE release PR.
+
+**The owner merges the release PR into `main`; the agent then pushes the tag**
+(owner's decision, 2026-11-23; it replaces the 2026-09-24 wording "the tag is
+the owner's action", which the owner had not decided). Once the owner has
+merged the release PR, the session that prepared it, or one the owner points
+at it, tags without asking again:
+
+- **What:** an annotated `vX.Y.Z[-suffix]` tag on the release PR's merge
+  commit, for exactly the version its `CHANGELOG.md` entry names, with a
+  message shaped like the previous tag's
+  (`git for-each-ref refs/tags/<previous tag> --format='%(contents)'`): the
+  release PR and what each step did.
+- **Before the push:** every run on that merge commit has finished and none
+  failed (a cancelled run is checked for why, and a cancel the release caused
+  goes to the owner); `printReleaseVersion` on that commit prints the tag's
+  version core (the tag without its `v` and any `-suffix`); the tag does not
+  exist yet; `reproducible builds` is green on the release PR's head, and the
+  merge commit's tree equals that head's (`git diff --quiet <head> <merge>`);
+  if it does not, dispatch `reproducible builds` on `main` and wait for green.
+- **Never otherwise:** no tag on any other commit or on your own initiative,
+  and never move, delete or re-push a `v*` tag; a tag push publishes every
+  asset. A problem after the push goes to the owner (step 8).
+
 (v0.1.12 is the one exception to the one-PR rule: #484 carried steps 1–3 and
-#485 the bump and this rule. From v0.1.13 on, one PR.)
+#485 the bump and the 2026-09-24 tag wording. From v0.1.13 on, one PR.)
 
 Ask the owner too whether any merge since the last tag is an embargoed
 security fix: the release PR, the release notes and its `CHANGELOG.md` entry
@@ -259,7 +279,7 @@ question does not rest on memory.
    of the SAME release PR** (owner's request, 2026-11-15, mirroring Punicus
    #281). `CHANGELOG.md` follows Keep a Changelog. The release PR turns
    `## [Unreleased]` into `## [X.Y.Z] - <date>` (the exact version of the tag
-   the owner will push, its suffix included for a release candidate such as
+   the agent will push after the owner's merge, its suffix included for a release candidate such as
    `0.1.21-rc1`; when the tag's shape is still open, ask the owner which tag it
    will be), starts a new empty `## [Unreleased]` above it, and updates the
    compare links at the bottom (`[X.Y.Z]` compares the previous tag with

@@ -17,6 +17,7 @@ against. Do not move them out of `.claude/`, and not into `.claude/rules/`
 | build for Android or iOS, or a build fails on a missing toolchain             | `.claude/agent/build.md`             |
 | add or move a module, or touch host ↔ engine wiring or its exemptions         | `.claude/agent/architecture.md`      |
 | start a work item tied to an issue (session title), or open a PR (monitoring) | `.claude/agent/workflow.md`          |
+| change a project rule (this file, `.claude/agent/`, the review prompt) or architecture | `.claude/agent/workflow.md` |
 | plan, resume or continue multi-PR work: a part, a merge, the final PR         | `.claude/agent/multi-pr-plans.md`    |
 | write a PR description, answer review comments, or handle a fork PR           | `.claude/agent/pull-requests.md`     |
 | do any release work: tag, version, changelog, checkpoints, bootnodes, seeds, assets, bundles | `.claude/agent/releases.md` |
@@ -155,11 +156,20 @@ required `reproducible builds` run.
   instruction or a GitHub comment), and the part meets every condition listed
   there, among them a POSTED automated review (a green `claude-review` job
   alone is not one). A PR into `main` has no exception.
-- **Never push a `v*` tag on your own initiative.** The tag is the owner's action.
+- **The owner merges the release PR into `main`; then you push the `v*` tag**
+  (owner's decision, 2026-11-23). Tag only the merge commit of a release PR
+  the owner merged, for the version its `CHANGELOG.md` entry names, once that commit's runs on
+  `main` have finished with none failed. No tag otherwise, and never move,
+  delete or re-push one. Full text: `.claude/agent/releases.md`.
 - **Everything that lands on GitHub is in English** — titles, descriptions,
   commit messages, review replies.
-- **Changes to project rules (this file, `.claude/agent/`) or to architecture are
-  the owner's call**, not the PR author's.
+- **Every change to a project rule or to architecture is signed off by the
+  owner, through a question, before it is committed** (owner's decision,
+  2026-11-23). Project rules: this file, `.claude/agent/`,
+  `.github/claude-review-prompt.md`. Show the exact before/after text and
+  commit only on a yes in THIS conversation, including for wording that comes
+  from a review finding or "only clarifies". Full text:
+  `.claude/agent/workflow.md`.
 
 ### Multi-PR plans land through a feature branch, never piece by piece on `main`
 
@@ -199,7 +209,8 @@ mainnet bootnodes? 3. run the cold-start checks?), then the mandatory steps
 (owner's decision, 2026-11-22), 6. extend the checkpoint tables, 7. turn `[Unreleased]` in `CHANGELOG.md` into the entry of
 the exact tag to come; every `v*` tag gets a PR for it), all in ONE release PR. Ask too whether a
 merge since the last tag is an embargoed security fix: its release PR, notes
-and changelog entry then stay neutral. The tag is the owner's action. After
+and changelog entry then stay neutral. The owner merges the release PR; you
+then push the tag. After
 the tag (8.), a release is done only when `verify release` and `reproducible
 builds` are green — check and report them. Every release asset goes through
 `.github/release-assets.sh`, never a bare `gh release upload`.
