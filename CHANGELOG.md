@@ -19,6 +19,25 @@ its trust anchors and release checks.
 
 ## [Unreleased]
 
+## [0.1.22] - 2026-11-23
+
+### Fixed
+
+- Engine library: v0.1.21 shipped without it. Its publish to GitHub Packages
+  failed with HTTP 404 after the repository moved to `VesperBats/myotis`, and
+  that failure also kept it off the `maven-repo` branch and the release. The
+  publish URL, and the one in the Android library guide, now name the new
+  location (#915). 0.1.22 is the first engine library since 0.1.21-rc1.
+
+### Changed
+
+- Engine ABI 60 (unchanged from 0.1.21).
+- Trust anchors: the embedded checkpoints of mainnet, Gnosis and Sepolia
+  moved to 2026-11-23 (mainnet slot 15,716,544) in the Java and Rust engines,
+  and mainnet's in the Go engine too; the checkpoint table extends to block
+  26,476,643, cross-checked against a second node. The mainnet bootnodes still
+  equal go-ethereum's.
+
 ## [0.1.21] - 2026-11-22
 
 ### Added
@@ -672,7 +691,8 @@ MetaMask; ENS with CCIP-Read; mainnet and Gnosis Chain; the Android app, the
 shared Compose Multiplatform UI and the macOS dmg; and `:myotis-api`, the
 engine contract (#1 to #123).
 
-[Unreleased]: https://github.com/biafra23/myotis/compare/v0.1.21...HEAD
+[Unreleased]: https://github.com/biafra23/myotis/compare/v0.1.22...HEAD
+[0.1.22]: https://github.com/biafra23/myotis/compare/v0.1.21...v0.1.22
 [0.1.21]: https://github.com/biafra23/myotis/compare/v0.1.21-rc1...v0.1.21
 [0.1.21-rc1]: https://github.com/biafra23/myotis/compare/v0.1.20...v0.1.21-rc1
 [0.1.20]: https://github.com/biafra23/myotis/compare/v0.1.20-rc1...v0.1.20
