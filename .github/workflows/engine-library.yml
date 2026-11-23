@@ -406,8 +406,10 @@ jobs:
         run: |
           set -euo pipefail
           v="${GITHUB_REF_NAME#v}"
+          # The registry's URLs take the owner lowercase (build.gradle.kts publishes there so).
+          repo_lc=$(printf '%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')
           for a in myotis-engine-ios myotis-engine-ios-iosarm64 myotis-engine-ios-iossimulatorarm64; do
-            url="https://maven.pkg.github.com/${GITHUB_REPOSITORY}/eth/myotis/$a/$v/$a-$v.pom"
+            url="https://maven.pkg.github.com/${repo_lc}/eth/myotis/$a/$v/$a-$v.pom"
             # Retried: this runs after the irrevocable publish, where a failed job
             # cannot simply be re-run (see this job's header).
             curl -fsS --retry 5 --retry-all-errors --retry-delay 3 --max-time 300 -o /dev/null \
@@ -431,6 +433,7 @@ jobs:
         run: |
           set -euo pipefail
           v="${GITHUB_REF_NAME#v}"
+          repo_lc=$(printf '%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')
           tmp=$(mktemp -d); n=0
           while IFS= read -r f; do
             rel=${f#build/maven-repo/}
@@ -439,7 +442,7 @@ jobs:
             # difference: this runs after the irrevocable publish.
             curl -fsSL --retry 5 --retry-all-errors --retry-delay 3 --max-time 300 \
               -u "${GITHUB_ACTOR}:${GITHUB_TOKEN}" -o "$tmp/x" \
-              "https://maven.pkg.github.com/${GITHUB_REPOSITORY}/$rel" \
+              "https://maven.pkg.github.com/${repo_lc}/$rel" \
               || { echo "::error::$rel could not be fetched from GitHub Packages after 6 attempts (not a byte difference: the check did not get that far)"; exit 1; }
             cmp -s "$f" "$tmp/x" || { echo "::error::$rel on GitHub Packages differs from the staged, checked copy"; exit 1; }
             n=$((n + 1))
