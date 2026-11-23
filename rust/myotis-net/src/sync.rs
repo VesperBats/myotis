@@ -1021,6 +1021,16 @@ const SEPOLIA_STATIC_PEERS: &[&str] = &[
     // TCP port answered (its peer count was not read: zbox's REST is not
     // reachable from the nuc). The dead-pins and old-anchor steps did not run.
     // The owner waived it for this release (2026-11-22).
+    //
+    // Release check for v0.1.22 (2026-11-23). The refreshed anchor (slot
+    // 11640768, period 1420) failed: run 45142481008 found roost answering
+    // ResourceUnavailable and this Nimbus "LC bootstrap unavailable" for it (its
+    // re-run: both dials failed), and the nuc saw roost refuse it too while
+    // serving slot 11632640 and the newest finalized slot. The owner kept
+    // v0.1.21's anchor (slot 11632064, period 1419): run 45152268438, 2 of 2 —
+    // both pins served the bootstrap, the period-1419 update and period 1421's.
+    // The cold start with every pin unreachable and the old-anchor walk from
+    // oldest-servable.properties (period 1323 to 1421, 98 behind) reached SYNCED.
     "/ip4/188.68.32.16/tcp/9104/p2p/16Uiu2HAkvYx58piGw1oxz34CUoeTv8nNQwTwE2cZZh4jR4wVMYy6",
 ];
 

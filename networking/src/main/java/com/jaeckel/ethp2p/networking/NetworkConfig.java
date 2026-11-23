@@ -459,6 +459,9 @@ public record NetworkConfig(
             // served it; this Nimbus refused every libp2p handshake while its TCP
             // port answered. 1 of 2 — the owner waived it for this release.
             // Details in the Rust twin.
+            // Release check for v0.1.22 (2026-11-23), slot 11632064 (v0.1.21's,
+            // kept: neither pin served the refreshed 11640768): run 45152268438,
+            // 2 of 2, both cold starts SYNCED. Details in the Rust twin.
             // Keep this list identical to SEPOLIA_STATIC_PEERS in
             // rust/myotis-net/src/sync.rs (both parity tests pin it).
             List.of(
