@@ -99,12 +99,21 @@ and scripts.
 ant is on no registry, so no advisory database (RustSec, GitHub advisories, Dependabot
 alerts) can name it, as a git pin or as a copy. Its registry dependencies stay covered
 through `rust/swarm/Cargo.lock`; ant's own code, which parses what Swarm peers send, is
-not. Nothing reports a security fix in ant: it reaches Myotis only when someone moves this
-copy. Of the three open items `rust/swarm/src/lib.rs` lists, freedom-hq/ant#269 and #270
-are fixed here by the patches above until upstream merges them, and #271 is accepted for
-now. Who watches ant's commits and how often was the owner's to
-settle before a release links it (owner, 2026-11-20); every shipped build links it since the
-owner's decision of 2026-11-24, which lands after that watch.
+not. A security fix in ant reaches Myotis only when someone moves this copy. Of the three
+open items `rust/swarm/src/lib.rs` lists, freedom-hq/ant#269 and #270 are fixed here by the
+patches above until upstream merges them, and #271 is accepted for now.
+
+Who watches it (owner's decision, 2026-11-24): `.github/workflows/ant-upstream-watch.yml`,
+daily (`scripts/ant_upstream_watch.sh`). It compares upstream's default branch with the
+commit above and reports, in one issue labelled `ant-upstream` and assigned to the owner,
+the commits since it (those whose message reads like a security fix singled out), the
+tags and releases on them, upstream's published GitHub security advisories, and the state
+of the three issues above. It comments only when one of those facts changes (a tag, a
+commit whose message reads like a security fix, an advisory, one of the three issues);
+other upstream commits only refresh the issue's description. The owner, acting on the
+issue, decides whether the copy moves and whether a release follows; the workflow never
+re-vendors and never closes the issue. The issues' states also say when a patch can go:
+upstream's merge of #276 or #277 closes #269 or #270.
 
 ## The SBOM
 

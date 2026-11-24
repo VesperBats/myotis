@@ -40,9 +40,10 @@
 //!
 //! ant itself is vendored (`rust/vendor/ant`, its `VENDORED.md`): no build fetches it from
 //! GitHub, and the copy is upstream's at one commit plus exactly those patches, each dropped
-//! once upstream has merged its PR. Being on no registry, ant has no advisory coverage:
-//! nothing reports a security fix in ant, which reaches Myotis only when the copy is moved
-//! (`VENDORED.md`, "Watching upstream").
+//! once upstream has merged its PR. Being on no registry, ant has no advisory coverage: a
+//! security fix in ant reaches Myotis only when the copy is moved. A daily workflow reports
+//! what upstream has beyond the copy to the owner, who decides on moving it (`VENDORED.md`,
+//! "Watching upstream").
 
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
