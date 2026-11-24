@@ -1006,7 +1006,29 @@ pub fn pause(handle: i64) -> bool {
         ledger.tick(true);
     }
     tracing::info!(handle, "paused (networking torn down; warm state persisted)");
+    reader_follows_chains(engine);
     true
+}
+
+/// Whether no handle is `Running` (all created, paused or gone). True too when the map is
+/// poisoned: then no read can reach a chain either.
+fn no_chain_running(engine: &EngineState) -> bool {
+    engine
+        .handles
+        .lock()
+        .map(|m| !m.values().any(|e| matches!(e, ChainEntry::Running(..))))
+        .unwrap_or(true)
+}
+
+/// A running handle paused or stopped: if it was the last one, the Swarm reader's node stops
+/// too (`addrhist::chains_idle`). Its node has its own runtime, connections and timers, which
+/// the chain's teardown does not reach; left up, it would keep the radio awake on an
+/// idle-slept phone for a feature read once. The next history read (which needs a running
+/// handle) starts it again.
+fn reader_follows_chains(engine: &EngineState) {
+    if no_chain_running(engine) {
+        crate::addrhist::chains_idle();
+    }
 }
 
 /// Shut down a started-but-not-published sync handle + reader (the lost-race
@@ -1324,6 +1346,7 @@ pub fn stop(handle: i64) {
         if let (Some(p), Ok(mut td)) = (cfg.snapshot_path.as_ref(), engine.tearing_down.lock()) {
             td.remove(p);
         }
+        reader_follows_chains(engine);
     } else if let Some(ledger) = &ledger {
         ledger.tick(true);
     }
@@ -3316,7 +3339,11 @@ pub fn address_history_json(handle: i64, address: &str, options_json: &str) -> S
     };
     let head = Some(reader.optimistic_block_number()).filter(|h| *h > 0);
     let trust = crate::addrhist::Trust::of(&reader);
-    crate::addrhist::history_json(&engine.rt, chain_id, head, trust, address, options_json)
+    let page = crate::addrhist::history_json(&engine.rt, chain_id, head, trust, address, options_json);
+    // The last chain may have paused while this read ran, its stop finding no node yet and
+    // this read then starting one: stop it now, not at the next pause.
+    reader_follows_chains(engine);
+    page
 }
 
 /// `verify_address_history_json`: check entries of `address`'s history (as a page returns
@@ -5394,6 +5421,19 @@ mod tests {
         // The stash dies with the handle.
         stop(handle);
         assert!(stashed(handle).is_none());
+    }
+
+    /// The Swarm reader follows the chains: created and paused handles do not keep it up, so a
+    /// pause or stop that leaves only such handles stops its node (`reader_follows_chains`).
+    #[test]
+    fn only_a_running_handle_keeps_the_swarm_reader_up() {
+        let engine = engine().expect("engine");
+        let id = create("mainnet", "");
+        assert!(id >= 1, "create failed: {id}");
+        // No test starts a handle (that needs the network), so none is Running here.
+        assert!(no_chain_running(engine), "a created handle counted as running");
+        stop(id);
+        assert!(no_chain_running(engine));
     }
 
     #[test]

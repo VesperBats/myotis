@@ -32,7 +32,10 @@ its trust anchors and release checks.
 
 - Swarm reader (the embedded `ant` node behind the address history): it is
   outbound only, with no listener, no UPnP port mapping on the user's router
-  and no address of its own advertised to peers, and it makes no DNS query. It
+  and no external address in identify, and it makes no DNS query. A peer it
+  dials still learns the public IP and port it sees the connection come from:
+  each BZZ handshake echoes that address back to the peer, signed with the
+  session's fresh key, as for any node behind NAT. It
   joins Swarm mainnet through seven pinned IP bootnodes, and hickory-resolver
   0.25 and libp2p-dns are no longer built. A cold start takes about 10 s
   longer before the first read, the time bee waits for the identify addresses

@@ -24,11 +24,13 @@
 //!   Unpatched, ant listens on `0.0.0.0` and runs libp2p's UPnP behaviour, which asks the
 //!   local router for a port mapping and announces the public address to peers. This crate
 //!   starts every node with ant's `outbound_only`: no listener, no UPnP, and no external
-//!   address of ours announced (neither a mapped one nor one a peer observed). A peer sees
-//!   the address of the connection the node dials it from, and the BZZ handshake echoes that
-//!   address back to it; bee keeps no address of a light node in its address book and does
-//!   not gossip light nodes to other peers (`pkg/p2p/libp2p` and `kademlia.Announce` in
-//!   ethersphere/bee). The cost: with no address in identify, bee holds each inbound
+//!   address of ours in identify (neither a mapped one nor one a peer observed). A peer sees
+//!   the address of the connection the node dials it from, and each BZZ handshake echoes that
+//!   address back to it as the node's underlay, signed with the node's BZZ key: the peer then
+//!   holds a signed record tying this session's overlay to the public IP and port it saw (the
+//!   key is fresh for every start, [`SwarmNode::start`]). bee keeps no address of a light
+//!   node in its address book and does not gossip light nodes to other peers
+//!   (`pkg/p2p/libp2p` and `kademlia.Announce` in ethersphere/bee). The cost: with no address in identify, bee holds each inbound
 //!   handshake for its 10 s peerstore wait, so a cold start has its first BZZ peer after
 //!   about 10 s (measured 2026-11-24: first peer 10.1 s, 8 serving peers 16 s), once per
 //!   start, as the handshakes run in parallel.
@@ -74,11 +76,16 @@ pub const MAINNET_NETWORK_ID: u64 = 1;
 /// 9.9.9.9. Kept: every `/ip4/…/tcp/1634/p2p/…` leaf, once (`sao` lists `tor`'s), in that
 /// order. Left out: the `/tcp/1635/tls/sni/…/ws` leaves (ant dials TCP only), among them the
 /// only address of `5.78.94.214` (`hil`). Each answered on TCP 1634 that day, and a node
-/// started from them alone had 24 peers within 11 s. The reader keeps no peer store
+/// started from them alone, outbound only, had its first BZZ peer after 10.1 s, its first
+/// serving peer after 15.2 s and 15 serving peers (24 connections) after 20 s
+/// (`mainnet_through_the_pinned_bootnodes`, 2026-11-24; an earlier run that day: 8 serving
+/// after 16 s). The reader keeps no peer store
 /// ([`SwarmConfig::mainnet`]'s `peerstore_path` is `None`), so every start joins through this
 /// list; one live entry is enough, as peers then come through hive gossip. Refreshed in a
 /// release PR, like Ethereum's bootnodes (`.claude/agent/releases.md`), with
-/// `mainnet_through_the_pinned_bootnodes` (a test, `--ignored`) as the check.
+/// `mainnet_through_the_pinned_bootnodes` (a test, `--ignored`) as the check, which the
+/// `cold-start regression` workflow also runs (its `full`, `pins-only` and `swarm-pins`
+/// scopes), so a dead pin set can be found between releases.
 pub const MAINNET_BOOTNODES: [&str; 7] = [
     "/ip4/159.223.6.181/tcp/1634/p2p/QmP9b7MxjyEfrJrch5jUThmuFaGzvUPpWEJewCpx5Ln6i8", // ams
     "/ip4/135.181.84.53/tcp/1634/p2p/QmTxX73q8dDiVbmXU7GqMNwG3gWmjSFECuMoCsTW4xp6CK", // hel
@@ -154,15 +161,21 @@ pub struct SwarmConfig {
 }
 
 impl SwarmConfig {
-    /// Swarm mainnet through its pinned bootnodes ([`MAINNET_BOOTNODES`]).
+    /// Swarm mainnet through its pinned bootnodes ([`MAINNET_BOOTNODES`]). An entry that does
+    /// not parse as a multiaddr is left out with a warning, never a panic: this runs on the
+    /// engine's FFI paths, under `panic = "abort"`. A test checks that every entry parses, so
+    /// a release leaves none out.
     pub fn mainnet() -> Self {
         Self {
             network_id: MAINNET_NETWORK_ID,
             bootnodes: MAINNET_BOOTNODES
                 .iter()
-                .map(|a| {
-                    a.parse()
-                        .expect("MAINNET_BOOTNODES are multiaddrs (a test checks them)")
+                .filter_map(|a| match a.parse() {
+                    Ok(addr) => Some(addr),
+                    Err(e) => {
+                        tracing::warn!(target: "myotis_swarm", "pinned bootnode {a} left out: {e}");
+                        None
+                    }
                 })
                 .collect(),
             allow_private_dials: false,
@@ -196,7 +209,8 @@ pub struct SwarmNode {
 impl SwarmNode {
     /// Starts a node on a runtime of its own (two worker threads). Callable from any thread,
     /// with or without a runtime. The node is outbound only: it listens nowhere, maps no port
-    /// over UPnP and announces no address of its own. A bootnode named by DNS ([`needs_dns`])
+    /// over UPnP and puts no external address in identify (each BZZ handshake still echoes,
+    /// signed, the address the peer saw it dial from). A bootnode named by DNS ([`needs_dns`])
     /// is refused: this build resolves no names. Its identity (the BZZ signing key, the
     /// overlay nonce and the libp2p key, unrelated to each other) is fresh for every start: a
     /// reader needs no stable identity, and a fresh one links fewer sessions together.
@@ -412,10 +426,14 @@ mod tests {
     }
 
     /// The pinned bootnodes are what ant can dial without DNS: TCP over IPv4, each with its
-    /// peer id, no name anywhere, no duplicate.
+    /// peer id, no name anywhere, no duplicate. And every one parses: [`SwarmConfig::mainnet`]
+    /// leaves out an entry that does not, so this is what keeps the list complete.
     #[test]
     fn mainnet_bootnodes_are_ip_multiaddrs_with_peer_ids() {
         use libp2p::multiaddr::Protocol;
+        for a in MAINNET_BOOTNODES {
+            assert!(a.parse::<Multiaddr>().is_ok(), "{a} is not a multiaddr");
+        }
         let cfg = SwarmConfig::mainnet();
         assert_eq!(cfg.bootnodes.len(), MAINNET_BOOTNODES.len());
         let mut peers = std::collections::HashSet::new();
@@ -493,11 +511,11 @@ mod tests {
 
     /// Swarm mainnet through the pinned bootnodes alone (not run by default: it needs the
     /// network). The node completes BZZ handshakes with peers that can serve retrievals, a read
-    /// is answered (a random address: not delivered), and it never listens or announces an
-    /// address of its own. Prints how long the handshakes took (bee waits up to 10 s for a
+    /// is answered (a random address: not delivered), and it never listens or puts an external
+    /// address in identify. Prints how long the handshakes took (bee waits up to 10 s for a
     /// peer's identify addresses, which an outbound-only node has none of). Run it when the
     /// pins move: `cargo test --manifest-path rust/swarm/Cargo.toml -- --ignored --nocapture
-    /// mainnet`.
+    /// mainnet`; the `cold-start regression` workflow runs it too (scope `swarm-pins`).
     #[test]
     #[ignore]
     fn mainnet_through_the_pinned_bootnodes() {

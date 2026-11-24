@@ -23,8 +23,9 @@ its public address to peers. `RunConfig::outbound_only` (and
 - the "no globally-routable external address" warning is skipped.
 
 The default (`false`) is unchanged. Peers still see the address of the
-connection we dial them from, which the BZZ handshake echoes back as our
-underlay, as for any node behind NAT.
+connection we dial them from, and the BZZ handshake echoes it back to them
+as our underlay, signed with our BZZ key (`observed_underlay` in the Ack),
+as for any node behind NAT.
 
 Closes #269
 

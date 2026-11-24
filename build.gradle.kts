@@ -732,7 +732,8 @@ configure(subprojects.filter { it.name in publishedArtifactIds }) {
 // With cargo installed, Gradle builds both engines:
 //   cargoBuildHost  → rust/target/release/*.{so,dylib,dll}; wired into
 //                     :app run (java.library.path) and :consensus test
-//   cargoTest       → cargo test --workspace; wired into root `check`
+//   cargoTest       → cargo test --workspace (with the Swarm reader, as
+//                     cargoBuildHost); wired into root `check`
 //   cargoNdkAndroid → Android jniLibs (engine + native BLS) via
 //                     rust/build-android.sh; built from source (no committed
 //                     .so) and wired into :myotis-engine androidPreBuild. Required by
@@ -1050,10 +1051,14 @@ extra["torEngine"] = torEngine
 // the embedded ant node into the HOST library (cargoBuildHost: the daemon, the desktop
 // apps and the engine library's desktop natives) and the Android jniLibs (cargoNdkAndroid,
 // via build-android.sh's MYOTIS_SWARM_ENGINE: the engine library's AAR and the Android app),
-// so they can serve the address history. ON by default, so every shipped artifact carries
-// it and a rebuild from the documented commands gives the same bytes (owner's decision,
-// 2026-11-24: the release ships ant and the history works on Android; who watches ant
-// upstream: rust/vendor/ant/VENDORED.md, "Watching upstream"). iOS still refuses the history and
+// so they can serve the address history. ON by default, so every artifact built through these
+// two tasks carries it and a rebuild from the documented commands gives the same bytes (the
+// Node.js addon is the exception: node-binding.yml and scripts/repro/build_linux.sh build it
+// with a plain `cargo build -p myotis-node`, without the reader; it has no history call)
+// (owner's decision, 2026-11-24: the release ships ant and the history works on Android; who
+// watches ant upstream: rust/vendor/ant/VENDORED.md, "Watching upstream"). cargoTest tests the
+// workspace with the reader too, so the suites run against the libp2p build that ships (ant's
+// libp2p features unify with myotis-net's). iOS still refuses the history and
 // its static archive never takes the feature. Opt out with -PswarmEngine=false (an ant-free
 // engine that refuses the history, -32602). A bare -PswarmEngine, or true/1/yes/on, is the
 // default; false/0/no/off opt out; anything else fails the build rather than quietly
@@ -1535,11 +1540,19 @@ tasks.register<Exec>("uniffiGenerateKotlin") {
 
 val cargoTest = tasks.register<Exec>("cargoTest") {
     group = "rust"
-    description = "cargo test --workspace (self-skips when cargo is missing)"
+    description = "cargo test --workspace, with the Swarm reader unless -PswarmEngine=false (self-skips when cargo is missing)"
     onlyIf { rustAvailable }
     workingDir = file("rust")
     rustToolchainPath?.let { environment("PATH", it) }
-    commandLine(rustTool("cargo"), "test", "--locked", "--workspace")
+    // The Swarm reader as cargoBuildHost builds it (-PswarmEngine, on by default), so the
+    // workspace is tested with the feature set, and the unified libp2p, that ships.
+    commandLine(
+        buildList {
+            addAll(listOf(rustTool("cargo"), "test", "--locked", "--workspace"))
+            if (swarmEngine) addAll(listOf("--features", "myotis-engine/swarm"))
+        }
+    )
+    inputs.property("swarmEngine", swarmEngine)
     // No declared outputs: cargo's own incrementalism makes a no-change rerun
     // cheap, and test verdicts aren't files Gradle could fingerprint.
 }
