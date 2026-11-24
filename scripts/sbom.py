@@ -70,8 +70,11 @@ CRATES_IO = "registry+https://github.com/rust-lang/crates.io-index"
 # Vendored trees under rust/vendor: path crates (no lock `source`) that are NOT Myotis's own.
 # Each tree's VENDORED.md names its upstream and commit ("Upstream: <url>", "Commit: <sha>");
 # its crates are listed as that upstream at that commit (rust/vendor/ant/VENDORED.md, "The
-# SBOM"), never left out as if they were Myotis's.
+# SBOM"), never left out as if they were Myotis's. A tree's patch series, `<tree>-patches/`
+# beside it (scripts/vendor_ant.sh applies it after the copy), is not a tree: each of its
+# patches is named on every crate of the tree (property `myotis:patched-by`).
 VENDOR_DIR = "rust/vendor"
+PATCHES_SUFFIX = "-patches"
 
 # Modules whose coordinates depend on the build host. The root build keeps them
 # out of the lock state (dependencyLocking.ignoredDependencies) while
@@ -304,12 +307,21 @@ def gradle_components(root, product, pinned):
 # --- Cargo --------------------------------------------------------------------
 
 def vendored_crates(root):
-    """name -> (upstream url, commit, tree) for every crate of every tree under VENDOR_DIR."""
+    """name -> (upstream url, commit, tree, patches) for every crate of every tree under VENDOR_DIR."""
     out = {}
     base = root / VENDOR_DIR
     if not base.is_dir():
         return out
-    for tree in sorted(p for p in base.iterdir() if p.is_dir()):
+    dirs = sorted(p for p in base.iterdir() if p.is_dir())
+    for series in (d for d in dirs if d.name.endswith(PATCHES_SUFFIX)):
+        if not (base / series.name.removesuffix(PATCHES_SUFFIX)).is_dir():
+            raise SbomError(f"{series}: a patch series without its vendored tree")
+        stray = [f.name for f in series.iterdir() if not (f.is_file() and f.suffix == ".patch")]
+        if stray:
+            raise SbomError(f"{series}: holds {', '.join(sorted(stray))}, not only *.patch files")
+    for tree in (d for d in dirs if not d.name.endswith(PATCHES_SUFFIX)):
+        series = base / (tree.name + PATCHES_SUFFIX)
+        patches = tuple(sorted(str(f.relative_to(root)) for f in series.glob("*.patch"))) if series.is_dir() else ()
         notes = tree / "VENDORED.md"
         if not notes.is_file():
             raise SbomError(f"{tree}: a vendored tree without VENDORED.md")
@@ -321,7 +333,7 @@ def vendored_crates(root):
         for manifest in sorted(tree.glob("**/Cargo.toml")):
             package = tomllib.loads(manifest.read_text(encoding="utf-8")).get("package")
             if package and "name" in package:
-                out[package["name"]] = (upstream.group(1), commit.group(1), str(tree.relative_to(root)))
+                out[package["name"]] = (upstream.group(1), commit.group(1), str(tree.relative_to(root)), patches)
     return out
 
 
@@ -369,13 +381,14 @@ def cargo_components(root, product):
                 if package["name"] not in vendored:
                     continue  # one of the workspace's own crates: part of the product itself
                 # A vendored crate: the upstream's, at the commit its VENDORED.md names.
-                upstream, commit, tree = vendored[package["name"]]
+                upstream, commit, tree, patches = vendored[package["name"]]
                 name, version = package["name"], package["version"]
                 source = f"git+{upstream}?rev={commit}#{commit}"
                 purl = f"pkg:cargo/{quote(name)}@{quote(version)}?vcs_url=" + quote(source)
                 crate = crates.setdefault(purl, (name, version, source, None, set()))
                 crate[4].add(lockfile)
                 crate[4].add(f"vendored:{tree}")
+                crate[4].update(f"patched:{p}" for p in patches)
                 continue
             name, version, source = key
             purl = f"pkg:cargo/{quote(name)}@{quote(version)}"
@@ -393,9 +406,12 @@ def cargo_components(root, product):
         component = {"type": "library", "bom-ref": purl, "name": name, "version": version, "purl": purl}
         if checksum:
             component["hashes"] = [{"alg": "SHA-256", "content": checksum}]
-        properties = [("myotis:pinned-by", lf) for lf in sorted(lockfiles) if not lf.startswith("vendored:")]
+        properties = [("myotis:pinned-by", lf) for lf in sorted(lockfiles)
+                      if not lf.startswith(("vendored:", "patched:"))]
         properties += [("myotis:vendored", lf.removeprefix("vendored:")) for lf in sorted(lockfiles)
                        if lf.startswith("vendored:")]
+        properties += [("myotis:patched-by", lf.removeprefix("patched:")) for lf in sorted(lockfiles)
+                       if lf.startswith("patched:")]
         if source != CRATES_IO:
             properties.append(("myotis:cargo:source", source))
         component["properties"] = [{"name": n, "value": v} for n, v in properties]

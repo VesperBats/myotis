@@ -102,8 +102,13 @@ pub fn parse_config(json: &str) -> Result<Config, String> {
                     }
                     #[cfg(feature = "swarm")]
                     for b in &bootnodes {
-                        b.parse::<myotis_swarm::Multiaddr>()
+                        let addr = b
+                            .parse::<myotis_swarm::Multiaddr>()
                             .map_err(|_| format!("invalid bootnode multiaddr '{b}'"))?;
+                        // The reader resolves no names (ant's `dnsaddr` feature is off).
+                        if myotis_swarm::needs_dns(&addr) {
+                            return Err(format!("bootnode '{b}' names a host by DNS: give an /ip4/ or /ip6/ multiaddr"));
+                        }
                     }
                     Network::Dev { network_id, bootnodes }
                 }
@@ -1028,6 +1033,12 @@ mod tests {
             assert!(parse_config(bad).is_err(), "{bad}");
             let v: serde_json::Value = serde_json::from_str(&set_config_json(bad)).unwrap();
             assert_eq!(v["code"], eljson::INVALID_PARAMS, "{bad}");
+        }
+        // The reader resolves no names, so a DNS bootnode is refused, not left to fail later.
+        #[cfg(feature = "swarm")]
+        for dns in ["/dns4/bee.local/tcp/1634", "/dnsaddr/mainnet.ethswarm.org"] {
+            let bad = format!(r#"{{"swarm":{{"network":"dev","networkId":7,"bootnodes":["{dns}"]}}}}"#);
+            assert!(parse_config(&bad).unwrap_err().contains("DNS"), "{dns}");
         }
     }
 

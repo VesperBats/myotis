@@ -3,13 +3,17 @@
 # rust/swarm, into rust/vendor/ant: the crates rust/swarm builds, copied verbatim at one
 # commit, so that no build fetches ant from GitHub (owner's decision, 2026-11-20).
 #
-#   scripts/vendor_ant.sh <commit>   replace rust/vendor/ant with ant at <commit>
-#   scripts/vendor_ant.sh --check    compare rust/vendor/ant with upstream at its recorded commit
+#   scripts/vendor_ant.sh <commit>   replace rust/vendor/ant with ant at <commit>, patched
+#   scripts/vendor_ant.sh --check    compare rust/vendor/ant with upstream at its recorded
+#                                    commit plus the patch series
 #
 # Both fetch ant from GitHub; nothing else in the build does. An update is a PR whose diff
 # is ant's own change between the two commits, reviewed like code (rust/vendor/ant/VENDORED.md).
-# The only file that is not upstream's is the workspace manifest: its `members` list names
-# the vendored crates instead of all of ant's.
+# Two things are not upstream's: the workspace manifest's `members` list names the vendored
+# crates instead of all of ant's, and the patch series in rust/vendor/ant-patches
+# (NNNN-<name>.patch, applied in order after the copy, each sent upstream as a PR and named
+# in VENDORED.md; owner's decision, 2026-11-24). A patch goes when upstream merges its PR:
+# at the next update it no longer applies, and the script stops until it is deleted.
 set -euo pipefail
 
 REPO=https://github.com/freedom-hq/ant
@@ -20,6 +24,7 @@ FILES=(LICENSE-APACHE LICENSE-MIT contracts)
 
 root=$(cd "$(dirname "$0")/.." && pwd)
 dest=$root/rust/vendor/ant
+patches_dir=$root/rust/vendor/ant-patches
 
 usage() { echo "usage: $0 <40-hex commit> | --check" >&2; exit 2; }
 [ $# -eq 1 ] || usage
@@ -81,6 +86,47 @@ if n != 1:
 open(dst, 'wb').write(new)
 EOF
 
+# The patch series, in order: rust/vendor/ant-patches/NNNN-<name>.patch and nothing else
+# there, each named in VENDORED.md. --check reads what git tracks, so the series must have
+# no unstaged or untracked change either (the tree comparison below has the same rule).
+if [ "$mode" = check ] && [ -d "$patches_dir" ]; then
+  if ! git -C "$root" diff --quiet -- rust/vendor/ant-patches \
+     || [ -n "$(git -C "$root" ls-files --others --exclude-standard -- rust/vendor/ant-patches)" ]; then
+    git -C "$root" status --short -- rust/vendor/ant-patches >&2
+    echo "rust/vendor/ant-patches has unstaged or untracked changes (above): --check compares what git tracks" >&2
+    exit 1
+  fi
+fi
+patches=()
+if [ -d "$patches_dir" ]; then
+  for f in "$patches_dir"/* "$patches_dir"/.[!.]*; do
+    [ -e "$f" ] || continue
+    name=$(basename "$f")
+    if ! [[ -f "$f" && "$name" =~ ^[0-9]{4}-[a-z0-9-]+\.patch$ ]]; then
+      echo "rust/vendor/ant-patches/$name: the series holds only NNNN-<name>.patch files" >&2
+      exit 1
+    fi
+    if ! grep -qF "ant-patches/$name" "$dest/VENDORED.md" 2>/dev/null; then
+      echo "rust/vendor/ant-patches/$name is not described in rust/vendor/ant/VENDORED.md" >&2
+      exit 1
+    fi
+    patches+=("$f")
+  done
+fi
+# A git directory of its own for `git apply`, so that paths are taken relative to $out
+# whatever repository the temporary directory may sit in; bytes as they are (no autocrlf,
+# no whitespace fixing), and no fuzz: a patch whose context is not exactly there fails.
+git init -q --bare "$work/apply.git"
+git --git-dir="$work/apply.git" config core.autocrlf false
+for f in ${patches[@]+"${patches[@]}"}; do
+  if ! (cd "$out" && git --git-dir="$work/apply.git" --work-tree=. apply --whitespace=nowarn "$f"); then
+    echo "rust/vendor/ant-patches/$(basename "$f") does not apply to ant at $commit." >&2
+    echo "If upstream has merged its PR, delete the patch and its entry in VENDORED.md;" >&2
+    echo "otherwise rebase it onto $commit." >&2
+    exit 1
+  fi
+done
+
 # Instructions for coding agents have no place in a dependency: Claude Code loads a nested
 # CLAUDE.md when it reads files below it, so one in the copy would instruct every session
 # that works there (and .claude/agent/pull-requests.md notes that files below the root are
@@ -110,9 +156,9 @@ if [ "$mode" = check ]; then
   (cd "$root" && git ls-files -z -- rust/vendor/ant | git checkout-index -z --stdin --prefix="$tracked/")
   rm -f "$tracked/rust/vendor/ant/VENDORED.md"
   if git -c core.autocrlf=false diff --no-index --stat --exit-code "$out" "$tracked/rust/vendor/ant"; then
-    echo "rust/vendor/ant matches $REPO at $commit"
+    echo "rust/vendor/ant matches $REPO at $commit with its ${#patches[@]} patch(es)"
   else
-    echo "rust/vendor/ant differs from $REPO at $commit (above)" >&2
+    echo "rust/vendor/ant differs from $REPO at $commit with its ${#patches[@]} patch(es) (above)" >&2
     exit 1
   fi
   exit 0
@@ -139,4 +185,4 @@ if [ -n "$ignored" ]; then
   printf '  %s\n' $ignored >&2
   exit 1
 fi
-echo "rust/vendor/ant is now $REPO at $commit; review the diff, then update rust/swarm/Cargo.lock"
+echo "rust/vendor/ant is now $REPO at $commit with ${#patches[@]} patch(es); review the diff, then update rust/swarm/Cargo.lock"

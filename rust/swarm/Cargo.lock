@@ -127,7 +127,6 @@ dependencies = [
  "base64",
  "futures",
  "hex",
- "hickory-resolver",
  "if-addrs",
  "k256",
  "libp2p",
