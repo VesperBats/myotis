@@ -110,6 +110,15 @@ question does not rest on memory.
    a snap peer there (#414, 2026-09-02).
    Warm profiles and the dispatched smoke job hide this because they dial
    their peer cache directly.
+   **The Swarm bootnodes too** (same question): `MAINNET_BOOTNODES` in
+   `rust/swarm/src/lib.rs`, the only way the Swarm reader joins (no DNS, no
+   peer store). Walk `/dnsaddr/mainnet.ethswarm.org`'s `_dnsaddr` TXT records
+   recursively in every region: the root answers by the asker's location, so
+   query `_dnsaddr.emea.`, `_dnsaddr.apac.` and `_dnsaddr.amer.mainnet.ethswarm.org`
+   as well. Keep every `/ip4/…/tcp/…/p2p/…` leaf once, update the list, its date
+   and its doc comment, and run
+   `cargo test --manifest-path rust/swarm/Cargo.toml -- --ignored --nocapture mainnet`,
+   which must reach serving peers through the pins alone.
 3. **Run the cold-start checks?** (owner ruling, 2026-09-11.) Three live
    tests, all `#[ignore]`d so nothing else ever runs them, and together the
    only coverage of what a FRESH INSTALL does. Ordinary CI, the emulator smoke

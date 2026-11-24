@@ -210,7 +210,7 @@ Full text: `.claude/agent/reproducibility.md`.
 
 Read `.claude/agent/releases.md` in full before any release work. In outline:
 **ask three questions first** (1. refresh the trust checkpoints? 2. re-sync the
-mainnet bootnodes? 3. run the cold-start checks?), then the mandatory steps
+mainnet bootnodes, devp2p's and Swarm's? 3. run the cold-start checks?), then the mandatory steps
 (4. move the version pins, 5. *suspended*: the PoC seeds and their bundles are off
 (owner's decision, 2026-11-22), 6. extend the checkpoint tables, 7. turn `[Unreleased]` in `CHANGELOG.md` into the entry of
 the exact tag to come; every `v*` tag gets a PR for it), all in ONE release PR. Ask too whether a
@@ -314,8 +314,11 @@ Full text of the rule, the carve-outs and their boundaries: `.claude/agent/data-
   `STALE_ANCHOR` park the user may re-anchor on a fresh checkpoint that every
   answering checkpoint-sync server names, and the Rust engine may read the
   addr1 address index from Swarm through an embedded light node (`ant`, over
-  libp2p; in production never a Swarm HTTP API, and never a gateway), every
-  chunk checked and every entry a candidate until verified. None widens by analogy — anything outside
+  libp2p, outbound only and with pinned IP bootnodes, no DNS; shipped on desktop and
+  Android, not iOS; vendored with a patch series; in production never a Swarm HTTP
+  API, and never a gateway), every chunk checked and every entry a candidate until
+  verified; a daily workflow watches upstream ant and reports to the owner, who
+  decides on re-vendoring and a release (owner's decision, 2026-11-24). None widens by analogy — anything outside
   their stated boundaries needs its own decision.
 - **TrueBlocks Unchained Index mainnet publishing appears stalled**; the
   `:tx-history` scan is debug-only and misses recent history. If you find
