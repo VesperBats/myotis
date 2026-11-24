@@ -150,15 +150,16 @@ impl<'a> CheckpointTable<'a> {
 /// extended for v0.1.21 (2026-11-22) by `--extend` (eth2swarm `2707995`), which reproduced the
 /// old last entry (block 26,457,088) and linked every header from it through the old top up to
 /// the new one; extended again for v0.1.22 (2026-11-23) the same way, from the old last entry
-/// (block 26,467,328) through the old top (26,467,996). Each top is the source node's
-/// finalized block, cross-checked against Geth 1.17.7 (203 entries and the top equal). The
+/// (block 26,467,328) through the old top (26,467,996), and for v0.1.23 (2026-11-24), from the
+/// old last entry (block 26,476,544) through the old top (26,476,643). Each top is the source
+/// node's finalized block, cross-checked against Geth 1.17.7 (203 entries and the top equal). The
 /// sidecar `mainnet-1024.hashes.json` records the same, `extended_from` included.
 pub const MAINNET_PIN: TablePin = TablePin {
-    keccak256: hex32("e6cbcf4709eaf0b6023af03903091a9783e4faac24ef7c62b34b3465e9e8013f"),
-    entries: 25_857,
+    keccak256: hex32("cb318629e238aa34b1439cc62e6ae3bcfc1a564906dcb0e7fc3b4cf5bb7c523a"),
+    entries: 25_866,
     genesis_hash: hex32("d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3"),
-    top_number: 26_476_643,
-    top_hash: hex32("d9871937d40753928ab466c042288a0728fdba05cfe9cbd2b0fd3e636cb7eec2"),
+    top_number: 26_485_995,
+    top_hash: hex32("3d84b431ae1904b42f8ca762f929beec6cc1f775ca713eac303c29f81e48a6a5"),
 };
 
 /// Every mainnet table shipped so far, as `(entries, keccak256 of those entries)`, oldest
@@ -169,6 +170,7 @@ pub const MAINNET_SHIPPED: &[(u64, [u8; 32])] =
         (25_838, hex32("ccf5ad8849bb513d7aef7b7bc732b264e2874c6b6e24cc4880753ceb68cc03d0")),
         (25_848, hex32("2e243c4026af847fb4c31486cec58b4ca8c53022b899562bbb5c5490d8362778")),
         (25_857, hex32("e6cbcf4709eaf0b6023af03903091a9783e4faac24ef7c62b34b3465e9e8013f")),
+        (25_866, hex32("cb318629e238aa34b1439cc62e6ae3bcfc1a564906dcb0e7fc3b4cf5bb7c523a")),
     ];
 
 /// The embedded mainnet table's bytes, as committed.

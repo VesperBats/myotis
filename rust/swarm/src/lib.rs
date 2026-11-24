@@ -89,7 +89,11 @@ pub const MAINNET_NETWORK_ID: u64 = 1;
 /// started from them alone, outbound only, had its first BZZ peer after 10.1 s, its first
 /// serving peer after 15.2 s and 15 serving peers (24 connections) after 20 s
 /// (`mainnet_through_the_pinned_bootnodes`, 2026-11-24; an earlier run that day: 8 serving
-/// after 16 s). The reader keeps no peer store
+/// after 16 s). Walked again for v0.1.23 (2026-11-24, release step 2) through the default
+/// resolver, 1.1.1.1, 8.8.8.8 and `ns1.mainnet.ethswarm.org`: the same seven leaves, so the
+/// list is unchanged; started from them alone, the node had its first BZZ peer after 10.1 s,
+/// its first serving peer after 15.2 s and 17 serving peers (24 connections) after 20 s.
+/// The reader keeps no peer store
 /// ([`SwarmConfig::mainnet`]'s `peerstore_path` is `None`), so every start joins through this
 /// list; one live entry is enough, as peers then come through hive gossip. Refreshed in a
 /// release PR, like Ethereum's bootnodes (`.claude/agent/releases.md`), with
