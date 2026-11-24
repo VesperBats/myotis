@@ -7,7 +7,8 @@
 # .github/workflows/ant-upstream-watch.yml.
 #
 #   scripts/ant_upstream_watch.sh            compare, then open or update the issue
-#   scripts/ant_upstream_watch.sh --dry-run  compare and print the report; write nothing
+#   scripts/ant_upstream_watch.sh --dry-run  compare and print the report; write nothing,
+#                                            and fail if a read the report needs failed
 #
 # What it compares, against the commit VENDORED.md records (the same `Commit:` line that
 # scripts/vendor_ant.sh reads):
@@ -15,15 +16,27 @@
 #     the ones whose message reads like a security fix) and whether they touch the
 #     vendored crates;
 #   - upstream's tags and releases on those commits;
-#   - upstream's published GitHub security advisories, or a note that they could not be
-#     read;
+#   - upstream's published GitHub security advisories, or a note that they are not
+#     readable;
 #   - the state of the three upstream issues that keep `swarm` out of a release build.
 #
-# The issue: label `ant-upstream`, assigned to the owner. Nothing new (the same report as
-# the open issue's, or as the last closed one's) writes nothing. A changed report rewrites
-# the open issue's body and adds one comment saying what changed, so the owner is
-# notified; with no open issue, a new one is opened. It never closes an issue and never
-# re-vendors: both are the owner's (re-vendoring is `scripts/vendor_ant.sh <commit>`).
+# The issue: label `ant-upstream`, assigned to the owner; only issues whose body starts
+# with this script's marker are its own. Two levels of news:
+#   - the facts that notify: the vendored commit, whether upstream knows it or is behind
+#     it, the tags, the commits whose message reads like a security fix, the advisories
+#     (with their updated_at), the three issues' states, and whether the advisories are
+#     readable. A change comments on the open issue first, naming each fact that changed,
+#     then rewrites its body; with no open issue of its own, it opens one, unless the last
+#     closed one already reported the same facts (the owner closed it on purpose).
+#   - everything else (upstream's head moved by commits that match nothing above): the
+#     open issue's body is refreshed without a comment; a closed one stays closed.
+# Unchanged writes nothing. It never closes an issue and never re-vendors: both are the
+# owner's (re-vendoring is `scripts/vendor_ant.sh <commit>`).
+#
+# A read of upstream that fails is retried; if it still fails, the run ends red without
+# writing, and the next day's run tries again. Only upstream's own answers become facts:
+# a 404 from the compare view (upstream does not know the vendored commit), and a 4xx
+# from the advisories endpoint (not readable with this token, nor without one).
 #
 # Read-only on freedom-hq/ant. Needs gh and jq; to report, GH_TOKEN with issues: write on
 # the repository named by GITHUB_REPOSITORY (set in Actions; required outside a dry run).
@@ -35,11 +48,12 @@ UPSTREAM=freedom-hq/ant
 LABEL=ant-upstream
 OWNER=biafra23
 TITLE="Upstream ant is ahead of the vendored copy"
+MARKER_PREFIX="<!-- ant-upstream-watch "
 # The upstream issues `rust/swarm/src/lib.rs` names as the reasons the swarm feature is off.
 BLOCKERS=(269 270 271)
 # What makes a commit message read like a security fix. A hint for the owner, not a
 # verdict: a fix can be silent, and a match can be harmless.
-SECURITY_RE='secur|vulnerab|cve-|ghsa-|rustsec|advisor|exploit|attack|malicious|dos\b|denial|overflow|underflow|out[- ]of[- ]bounds|oob\b|panic|crash|unsound|unsafe|sanitiz|validat|untrusted|bypass|leak|amplif|exhaust|oom\b|unbounded'
+SECURITY_RE='secur|vulnerab|cve-|ghsa-|rustsec|advisor|exploit|attack|malicious|\bdos\b|denial|overflow|underflow|out[- ]of[- ]bounds|\boob\b|panic|crash|unsound|unsafe|sanitiz|validat|untrusted|bypass|leak|amplif|exhaust|\boom\b|unbounded'
 NEWEST=8
 
 dry_run=false
@@ -61,23 +75,43 @@ crates=$(cd "$root/rust/vendor/ant/crates" && ls -d -- */ | tr -d /)
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
-branch=$(gh api "repos/$UPSTREAM" --jq .default_branch)
-head=$(gh api "repos/$UPSTREAM/commits/$branch" --jq .sha)
+# up <errfile> <gh api args...>: a read of upstream, tried three times. Its stderr (gh
+# prints "HTTP 404" and the like there) is kept in <errfile> for the caller to tell
+# upstream's answer from a failed call.
+up() {
+  local err=$1; shift
+  local i
+  for i in 1 2 3; do
+    if gh api "$@" 2>"$err"; then return 0; fi
+    grep -q 'HTTP 4[0-9][0-9]' "$err" && ! grep -q 'HTTP 429' "$err" && return 1
+    [ "$i" = 3 ] || sleep $((i * 20))
+  done
+  return 1
+}
+# must <gh api args...>: a read the report cannot do without; a failure ends the run.
+must() {
+  up "$work/err" "$@" || { echo "::error::reading $UPSTREAM failed: $(tr '\n' ' ' < "$work/err")" >&2; exit 1; }
+}
+
+branch=$(must "repos/$UPSTREAM" --jq .default_branch)
+head=$(must "repos/$UPSTREAM/commits/$branch" --jq .sha)
 
 # The compare view pages its commits (oldest first); --slurp joins the pages. A vendored
-# commit upstream no longer knows (a rewritten history) is a report too, never a red run
-# that only whoever last edited the schedule hears about.
+# commit upstream does not know (404: a rewritten history) is a fact for the issue.
 compare_ok=true
-if ! gh api --paginate --slurp "repos/$UPSTREAM/compare/$vendored...$head?per_page=100" \
-    > "$work/compare.json" 2>"$work/compare.err"; then
+if ! up "$work/compare.err" --paginate --slurp "repos/$UPSTREAM/compare/$vendored...$head?per_page=100" \
+    > "$work/compare.json"; then
+  grep -q 'HTTP 404' "$work/compare.err" \
+    || { echo "::error::the compare view failed: $(tr '\n' ' ' < "$work/compare.err")" >&2; exit 1; }
   compare_ok=false
-  echo "::warning::cannot compare $vendored with $UPSTREAM's $branch: $(tr '\n' ' ' < "$work/compare.err")"
+  echo "::warning::$UPSTREAM does not know the vendored commit $vendored"
   echo '[{"status": "unknown", "ahead_by": 0, "behind_by": 0, "commits": [], "files": []}]' > "$work/compare.json"
 fi
 status=$(jq -r '.[0].status' "$work/compare.json")
 ahead=$(jq -r '.[0].ahead_by' "$work/compare.json")
 behind=$(jq -r '.[0].behind_by' "$work/compare.json")
-vendored_date=$(gh api "repos/$UPSTREAM/commits/$vendored" --jq .commit.committer.date 2>/dev/null || echo "")
+vendored_date=""
+[ "$compare_ok" = false ] || vendored_date=$(must "repos/$UPSTREAM/commits/$vendored" --jq .commit.committer.date)
 if [ "$behind" != 0 ]; then
   # The vendored commit is not an ancestor of upstream's branch: a force-push upstream,
   # or a commit that was never on it (vendor_ant.sh refuses one). Reported, never hidden.
@@ -94,22 +128,30 @@ crate_re="^($(printf '%s\n' $crates | sed 's|^|crates/|; s|$|/|' | paste -sd'|')
 touched=$(grep -E "$crate_re" "$work/files.txt" | sed -E 's|^crates/([^/]+)/.*|\1|' | sort -u | paste -sd' ' || true)
 
 # Tags on the commits since the vendored one; releases of those tags.
-gh api --paginate "repos/$UPSTREAM/tags?per_page=100" --jq '.[] | [.name, .commit.sha] | @tsv' > "$work/tags.tsv"
+must --paginate "repos/$UPSTREAM/tags?per_page=100" --jq '.[] | [.name, .commit.sha] | @tsv' > "$work/tags.tsv"
 newer_tags=$(awk -F'\t' 'NR==FNR { s[$1]; next } ($2 in s) { print $1 }' "$work/shas.txt" "$work/tags.tsv" | sort -V)
-gh api --paginate "repos/$UPSTREAM/releases?per_page=100" \
+must --paginate "repos/$UPSTREAM/releases?per_page=100" \
   --jq '.[] | select(.draft | not) | [.tag_name, .published_at, (.prerelease|tostring), .html_url] | @tsv' > "$work/releases.tsv"
 newer_releases=$(awk -F'\t' 'NR==FNR { t[$1]; next } ($1 in t)' <(printf '%s\n' "$newer_tags") "$work/releases.tsv")
 
 # Published advisories: public to anyone, but read with a token scoped to another
-# repository, so an unauthenticated read is tried before saying they could not be read.
+# repository, so an unauthenticated read is tried before calling them not readable. Only a
+# 4xx from both is that answer; anything else ends the run (retried tomorrow).
 advisories_ok=true
-if ! gh api "repos/$UPSTREAM/security-advisories?state=published&per_page=100" > "$work/adv.json" 2>"$work/adv.err"; then
-  if ! curl -fsSL -H 'Accept: application/vnd.github+json' \
-      "https://api.github.com/repos/$UPSTREAM/security-advisories?state=published&per_page=100" \
-      > "$work/adv.json" 2>>"$work/adv.err"; then
+adv_path="repos/$UPSTREAM/security-advisories?state=published&per_page=100"
+if ! up "$work/adv.err" "$adv_path" > "$work/adv.json"; then
+  grep -q 'HTTP 4[0-9][0-9]' "$work/adv.err" \
+    || { echo "::error::the advisories read failed: $(tr '\n' ' ' < "$work/adv.err")" >&2; exit 1; }
+  code=$(curl -sSL -o "$work/adv.json" -w '%{http_code}' --retry 2 -H 'Accept: application/vnd.github+json' \
+    "https://api.github.com/$adv_path" 2>>"$work/adv.err") || code=000
+  if [ "$code" != 200 ]; then
+    case "$code" in
+      4??) ;;
+      *) echo "::error::the advisories read failed (HTTP $code): $(tr '\n' ' ' < "$work/adv.err")" >&2; exit 1 ;;
+    esac
     advisories_ok=false
     echo '[]' > "$work/adv.json"
-    echo "::warning::cannot read $UPSTREAM's security advisories: $(tr '\n' ' ' < "$work/adv.err")"
+    echo "::warning::$UPSTREAM's security advisories are not readable: $(tr '\n' ' ' < "$work/adv.err") (HTTP $code)"
   fi
 fi
 advisory_count=$(jq 'length' "$work/adv.json")
@@ -118,17 +160,12 @@ advisory_count=$(jq 'length' "$work/adv.json")
 new_advisory_count=$(jq --arg d "$vendored_date" '[.[] | select($d == "" or .updated_at > $d or .published_at > $d)] | length' "$work/adv.json")
 
 blockers=""
-blocker_states=""
+blocker_facts=""
 for n in "${BLOCKERS[@]}"; do
-  if line=$(gh api "repos/$UPSTREAM/issues/$n" \
-      --jq '"\(.state)\t- [\(.state)] [\(.html_url | sub("https://github.com/"; "") | sub("/issues/"; "#"))](\(.html_url)) `\(.title | gsub("`"; "'"'"'"))`"' 2>/dev/null); then
-    blocker_states+="$n ${line%%$'\t'*} "
-    line=${line#*$'\t'}
-  else
-    blocker_states+="$n unknown "
-    line="- [$UPSTREAM#$n](https://github.com/$UPSTREAM/issues/$n): could not be read"
-  fi
-  blockers+="$line"$'\n'
+  line=$(must "repos/$UPSTREAM/issues/$n" \
+    --jq '"\(.state)\t- [\(.state)] [\(.html_url | sub("https://github.com/"; "") | sub("/issues/"; "#"))](\(.html_url)) `\(.title | gsub("`"; "'"'"'"))`"')
+  blocker_facts+="$UPSTREAM#$n is ${line%%$'\t'*}"$'\n'
+  blockers+="${line#*$'\t'}"$'\n'
 done
 
 security_commits=$(jq -r --arg re "$SECURITY_RE" \
@@ -138,16 +175,20 @@ newest=$(jq -r --argjson n "$NEWEST" \
   'reverse | .[0:$n][] | "- [`\(.sha[0:12])`](\(.html_url)) \(.commit.committer.date[0:10]) `\(.commit.message | split("\n")[0] | gsub("`"; "'"'"'"))`"' \
   "$work/commits.json")
 
-# What the report is about, without the date: the same state means nothing new to say.
-# Advisories count with their updated_at, so a revised one is news; a blocker issue
-# closing is news too. Whether the advisories could be read is not: a passing API error
-# would otherwise rewrite the issue twice.
-state=$(
-  { echo "vendored $vendored"; echo "head $head"; echo "behind $behind"; echo "compare $compare_ok"
-    printf 'tag %s\n' $newer_tags
-    jq -r '.[] | "advisory \(.ghsa_id) \(.updated_at)"' "$work/adv.json" | sort
-    echo "blockers $blocker_states"
-  } | sha256sum | cut -c1-16)
+# The facts that notify, one per line (plain words: a changed one is quoted in the
+# comment), and the full state, which adds upstream's head.
+{
+  echo "vendored commit ${vendored:0:12}"
+  [ "$compare_ok" = true ] || echo "upstream does not know the vendored commit"
+  [ "$behind" = 0 ] || echo "the vendored commit is not on $branch (behind by $behind)"
+  for t in $newer_tags; do echo "tag $t"; done
+  jq -r --arg re "$SECURITY_RE" '.[] | select(.commit.message | test($re; "i")) | "security-hint commit \(.sha[0:12])"' "$work/commits.json"
+  jq -r '.[] | "advisory \(.ghsa_id) updated \(.updated_at)"' "$work/adv.json" | sort
+  [ "$advisories_ok" = true ] || echo "advisories not readable"
+  printf '%s' "$blocker_facts"
+} | tr -d '>' > "$work/facts.txt"   # no '>' can end the HTML comment they are kept in
+notify=$(sha256sum < "$work/facts.txt" | cut -c1-16)
+state=$({ cat "$work/facts.txt"; echo "head $head"; } | sha256sum | cut -c1-16)
 nothing_ahead=false
 if [ "$compare_ok" = true ] && [ "$ahead" = 0 ] && [ "$behind" = 0 ] && [ -z "$newer_tags" ] \
     && [ "$new_advisory_count" = 0 ]; then
@@ -158,39 +199,44 @@ today=$(date -u +%Y-%m-%d)
 vshort=${vendored:0:12}
 hshort=${head:0:12}
 {
-  echo "<!-- ant-upstream-watch state=$state -->"
-  echo "Reported by the scheduled [ant upstream watch](https://github.com/${repo:-VesperBats/myotis}/actions/workflows/ant-upstream-watch.yml) on $today (\`scripts/ant_upstream_watch.sh\`; owner's decision, 2026-11-24). Re-vendoring, and whether a release follows, are the owner's; this workflow never re-vendors and never closes this issue."
+  echo "${MARKER_PREFIX}state=$state notify=$notify -->"
+  echo "Reported by the scheduled [ant upstream watch](https://github.com/${repo:-VesperBats/myotis}/actions/workflows/ant-upstream-watch.yml), last written on $today (\`scripts/ant_upstream_watch.sh\`; owner's decision, 2026-11-24). Re-vendoring, and whether a release follows, are the owner's; this workflow never re-vendors and never closes this issue. It comments when a tag, a security-hinted commit, an advisory or one of the issues below changes; other upstream commits only refresh this description."
   echo
   echo "## Commits"
   echo
   echo "Vendored: [\`$vshort\`](https://github.com/$UPSTREAM/commit/$vendored) (\`rust/vendor/ant/VENDORED.md\`). Upstream \`$branch\`: [\`$hshort\`](https://github.com/$UPSTREAM/commit/$head)."
   echo
   if [ "$compare_ok" = false ]; then
-    echo "**Upstream does not know the vendored commit** (the compare view failed): upstream rewrote its history, or the copy is not upstream's. Look at it by hand."
-  elif [ "$nothing_ahead" = true ]; then
-    echo "Upstream has nothing the vendored copy does not: no commit, tag or advisory newer than it."
-  elif [ "$ahead" = 0 ]; then
-    echo "No commit on \`$branch\` since the vendored commit."
+    echo "**Upstream does not know the vendored commit** (the compare view answers 404): upstream rewrote its history, or the copy is not upstream's. Look at it by hand."
   else
-    echo "**$ahead commit(s)** on \`$branch\` since the vendored commit ([compare](https://github.com/$UPSTREAM/compare/$vendored...$head))."
-    [ "$behind" = 0 ] || echo "**The vendored commit is not on \`$branch\`** (behind by $behind): upstream rewrote its history, or the copy is not upstream's."
-    [ "$listed" = "$ahead" ] || echo "The compare view listed $listed of them; the rest are in the compare link."
-    echo
-    if [ "$files_complete" = false ]; then
-      echo "The compare view lists only the first 300 changed files: whether they change the vendored crates is in the compare link."
-    elif [ -n "$touched" ]; then
-      echo "They change the vendored part of ant: $(printf '`%s`, ' $touched | sed 's/, $//')."
-    else
-      echo "None of them changes the vendored crates, \`Cargo.toml\` or \`contracts/\` (by the compare view's file list)."
+    if [ "$behind" != 0 ]; then
+      echo "**The vendored commit is not on \`$branch\`** (behind by $behind): upstream rewrote its history, or the copy is not upstream's."
+      echo
     fi
-    echo
-    echo "Messages that read like a security fix (a keyword hint, not a verdict):"
-    echo
-    if [ -n "$security_commits" ]; then echo "$security_commits"; else echo "- none"; fi
-    echo
-    echo "Newest $( [ "$ahead" -lt "$NEWEST" ] && echo "$ahead" || echo "$NEWEST" ):"
-    echo
-    echo "$newest"
+    if [ "$nothing_ahead" = true ]; then
+      echo "Upstream has nothing the vendored copy does not: no commit, tag or advisory newer than it."
+    elif [ "$ahead" = 0 ]; then
+      echo "No commit on \`$branch\` since the vendored commit."
+    else
+      echo "**$ahead commit(s)** on \`$branch\` since the vendored commit ([compare](https://github.com/$UPSTREAM/compare/$vendored...$head))."
+      [ "$listed" = "$ahead" ] || echo "The compare view listed $listed of them; the rest are in the compare link."
+      echo
+      if [ "$files_complete" = false ]; then
+        echo "The compare view lists only the first 300 changed files: whether they change the vendored crates is in the compare link."
+      elif [ -n "$touched" ]; then
+        echo "They change the vendored part of ant: $(printf '`%s`, ' $touched | sed 's/, $//')."
+      else
+        echo "None of them changes the vendored crates, \`Cargo.toml\` or \`contracts/\` (by the compare view's file list)."
+      fi
+      echo
+      echo "Messages that read like a security fix (a keyword hint over the whole message, not a verdict):"
+      echo
+      if [ -n "$security_commits" ]; then echo "$security_commits"; else echo "- none"; fi
+      echo
+      echo "Newest $( [ "$ahead" -lt "$NEWEST" ] && echo "$ahead" || echo "$NEWEST" ):"
+      echo
+      echo "$newest"
+    fi
   fi
   echo
   echo "## Tags and releases since the vendored commit"
@@ -210,7 +256,7 @@ hshort=${head:0:12}
   echo "## Published security advisories of $UPSTREAM"
   echo
   if [ "$advisories_ok" = false ]; then
-    echo "**Could not be read** (\`GET /repos/$UPSTREAM/security-advisories?state=published\` failed): look at https://github.com/$UPSTREAM/security/advisories by hand."
+    echo "**Not readable** (\`GET /repos/$UPSTREAM/security-advisories?state=published\` answers an error, with the job's token and without one): look at https://github.com/$UPSTREAM/security/advisories by hand."
   elif [ "$advisory_count" = 0 ]; then
     echo "None published."
   else
@@ -222,43 +268,60 @@ hshort=${head:0:12}
   printf '%s' "$blockers"
   echo
   echo "To move the copy: \`scripts/vendor_ant.sh <commit>\` in a PR that links the compare view (\`rust/vendor/ant/VENDORED.md\`, its rules: a commit at least 7 days old, a security fix excepted)."
+  echo
+  echo "<!-- ant-upstream-watch-facts"
+  cat "$work/facts.txt"
+  echo "-->"
 } > "$work/body.md"
 
 if [ "$dry_run" = true ]; then
-  echo "state=$state nothing_ahead=$nothing_ahead compare_ok=$compare_ok ahead=$ahead behind=$behind tags=[$(echo $newer_tags)] advisories=$advisory_count new_advisories=$new_advisory_count advisories_ok=$advisories_ok blockers=[$blocker_states]"
+  echo "state=$state notify=$notify nothing_ahead=$nothing_ahead compare_ok=$compare_ok ahead=$ahead behind=$behind tags=[$(echo $newer_tags)] advisories=$advisory_count new_advisories=$new_advisory_count advisories_ok=$advisories_ok"
   echo "----- issue body -----"
   cat "$work/body.md"
+  # A dry run is the proof that every read works with the job's token: a read that was
+  # answered with an error fails it, though a real run would report it.
+  [ "$compare_ok" = true ] && [ "$advisories_ok" = true ] || { echo "::error::a read failed (see above)" >&2; exit 1; }
   exit 0
 fi
 
-marker() { sed -n 's/^<!-- ant-upstream-watch state=\([0-9a-f]*\) -->.*/\1/p' | head -n1; }
+field() { sed -n "s/^${MARKER_PREFIX}.*$1=\\([0-9a-f]*\\).*/\\1/p" | head -n1; }
+old_facts() { sed -n '/^<!-- ant-upstream-watch-facts$/,/^-->$/p' | sed '1d;$d'; }
 
 if ! gh api "repos/$repo/labels/$LABEL" --silent 2>/dev/null; then
   gh api "repos/$repo/labels" -f name="$LABEL" -f color=d93f0b \
     -f description="Upstream ant is ahead of rust/vendor/ant (scheduled watch)" --silent
 fi
-gh api "repos/$repo/issues?labels=$LABEL&state=all&sort=created&direction=desc&per_page=20" \
-  --jq '[.[] | select(.pull_request | not)]' > "$work/issues.json"
+# Only the watch's own issues: a hand-written issue with the label is never rewritten.
+gh api "repos/$repo/issues?labels=$LABEL&state=all&sort=created&direction=desc&per_page=50" \
+  --jq "[.[] | select(.pull_request | not) | select((.body // \"\") | startswith(\"$MARKER_PREFIX\"))]" \
+  > "$work/issues.json"
 open=$(jq -r '[.[] | select(.state == "open")][0].number // empty' "$work/issues.json")
 
 if [ -n "$open" ]; then
-  old=$(jq -r --argjson n "$open" '.[] | select(.number == $n) | .body // ""' "$work/issues.json" | marker)
-  if [ "$old" = "$state" ]; then
+  jq -r --argjson n "$open" '.[] | select(.number == $n) | .body // ""' "$work/issues.json" > "$work/old.md"
+  if [ "$(field state < "$work/old.md")" = "$state" ]; then
     echo "issue #$open is current; nothing written"
     exit 0
   fi
-  jq -n --rawfile body "$work/body.md" '{body: $body}' | gh api -X PATCH "repos/$repo/issues/$open" --input - --silent
-  if [ "$nothing_ahead" = true ]; then
-    note="The vendored copy now has everything upstream has (\`$vshort\` is upstream's \`$branch\`). Closing this issue is the owner's."
-  else
-    note="The report changed: $ahead commit(s) since the vendored \`$vshort\`, upstream at \`$hshort\`"
-    [ -z "$newer_tags" ] || note+=", tags $(printf '`%s` ' $newer_tags | sed 's/ $//')"
-    [ "$advisory_count" = 0 ] || note+=", **$advisory_count published advisory(ies)**, $new_advisory_count newer than the copy"
-    [ "$advisories_ok" = true ] || note+=", advisories **not readable**"
-    note+=". The description above is updated."
+  if [ "$(field notify < "$work/old.md")" != "$notify" ]; then
+    # The comment first: it is what notifies. If the body write then fails, the next run
+    # comments again (at least once), rather than never.
+    old_facts < "$work/old.md" | sort > "$work/old_facts.txt"
+    sort "$work/facts.txt" > "$work/new_facts.txt"
+    {
+      echo "The report changed (upstream \`$branch\` at \`$hshort\`, $ahead commit(s) beyond the vendored \`$vshort\`):"
+      echo
+      comm -13 "$work/old_facts.txt" "$work/new_facts.txt" | sed 's/^/- new: /'
+      comm -23 "$work/old_facts.txt" "$work/new_facts.txt" | sed 's/^/- gone: /'
+      [ "$nothing_ahead" = false ] || { echo; echo "The vendored copy now has everything upstream has. Closing this issue is the owner's."; }
+      echo
+      echo "The description above is updated."
+    } > "$work/comment.md"
+    jq -n --rawfile body "$work/comment.md" '{body: $body}' | gh api "repos/$repo/issues/$open/comments" --input - --silent
+    echo "issue #$open: commented"
   fi
-  jq -n --arg body "$note" '{body: $body}' | gh api "repos/$repo/issues/$open/comments" --input - --silent
-  echo "issue #$open updated"
+  jq -n --rawfile body "$work/body.md" '{body: $body}' | gh api -X PATCH "repos/$repo/issues/$open" --input - --silent
+  echo "issue #$open: description updated"
   exit 0
 fi
 
@@ -266,9 +329,8 @@ if [ "$nothing_ahead" = true ]; then
   echo "upstream has nothing beyond the vendored commit; no issue"
   exit 0
 fi
-last=$(jq -r '.[0].body // ""' "$work/issues.json" | marker)
-if [ "$last" = "$state" ]; then
-  echo "the last closed issue #$(jq -r '.[0].number' "$work/issues.json") reported the same; nothing written"
+if [ "$(jq -r '.[0].body // ""' "$work/issues.json" | field notify)" = "$notify" ]; then
+  echo "the last closed issue #$(jq -r '.[0].number' "$work/issues.json") reported the same facts; nothing written"
   exit 0
 fi
 assignees='[]'

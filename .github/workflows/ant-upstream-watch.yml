@@ -12,14 +12,19 @@
 # security advisories (or that they could not be read), and the three upstream
 # issues that keep the `swarm` feature out of a release build.
 #
-# Quiet by design: an unchanged report writes nothing; a changed one rewrites the
-# open issue and adds one comment; a report the last closed issue already made is
-# not opened again. It never re-vendors and never closes an issue: moving the copy
-# (scripts/vendor_ant.sh) and whether a release follows are the owner's.
+# Quiet by design: it comments only when a fact that matters changes (a tag, a
+# commit whose message reads like a security fix, an advisory, one of the three
+# issues, the vendored commit), naming each; other upstream commits only refresh
+# the open issue's description, and a closed issue is opened again only for such a
+# fact. A failed read of upstream ends the run red and writes nothing. It never
+# re-vendors and never closes an issue: moving the copy (scripts/vendor_ant.sh)
+# and whether a release follows are the owner's. The script's header has the rest.
 #
-# Triggers: the daily schedule and workflow_dispatch report; a pull request that
-# changes the watch runs it with --dry-run (prints the report, writes nothing), so
-# the reads are proven with the job's own token before the merge. Read-only on
+# Triggers: the daily schedule and workflow_dispatch report, from main only. A
+# pull request that changes the watch, or a dispatch on another branch, runs it
+# with --dry-run (prints the report, writes nothing, fails if a read failed), so
+# the reads are proven with the job's own token before the merge, and a branch
+# with another VENDORED.md never rewrites the shared issue. Read-only on
 # freedom-hq/ant; the job's GITHUB_TOKEN with issues: write on this repository.
 name: ant upstream watch
 
@@ -35,8 +40,9 @@ on:
 permissions: {}
 
 concurrency:
-  # One report at a time: two runs could otherwise both open an issue.
-  group: ${{ github.workflow }}-${{ github.ref }}
+  # The runs that write share one group, whatever their ref: two of them could
+  # otherwise both open an issue. A dry run writes nothing and keeps to its ref.
+  group: ${{ github.workflow }}-${{ (github.event_name == 'pull_request' || github.ref != 'refs/heads/main') && github.ref || 'report' }}
   cancel-in-progress: false
 
 jobs:
@@ -54,7 +60,7 @@ jobs:
       - name: Compare and report
         env:
           GH_TOKEN: ${{ github.token }}
-          DRY_RUN: ${{ github.event_name == 'pull_request' }}
+          DRY_RUN: ${{ github.event_name == 'pull_request' || github.ref != 'refs/heads/main' }}
         run: |
           if [ "$DRY_RUN" = true ]; then
             scripts/ant_upstream_watch.sh --dry-run

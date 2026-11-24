@@ -73,7 +73,9 @@ daily (`scripts/ant_upstream_watch.sh`). It compares upstream's default branch w
 commit above and reports, in one issue labelled `ant-upstream` and assigned to the owner,
 the commits since it (those whose message reads like a security fix singled out), the
 tags and releases on them, upstream's published GitHub security advisories, and the state
-of the three issues above. An unchanged report writes nothing. The owner, acting on the
+of the three issues above. It comments only when one of those facts changes (a tag, a
+commit whose message reads like a security fix, an advisory, one of the three issues);
+other upstream commits only refresh the issue's description. The owner, acting on the
 issue, decides whether the copy moves and whether a release follows; the workflow never
 re-vendors and never closes the issue.
 
