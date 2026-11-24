@@ -3336,7 +3336,7 @@ pub fn verify_address_history_json(handle: i64, address: &str, entries_json: &st
 }
 
 /// `address_history_supported`: whether this build serves the address history at all (the
-/// Swarm reader linked, not mobile). A probe hosts consult before waking a chain for a call
+/// Swarm reader linked, not iOS). A probe hosts consult before waking a chain for a call
 /// that could only be refused.
 pub fn address_history_supported() -> bool {
     crate::addrhist::early_refusal().is_none()

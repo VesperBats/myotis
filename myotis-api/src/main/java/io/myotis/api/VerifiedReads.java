@@ -543,7 +543,7 @@ public interface VerifiedReads {
 
     /**
      * Whether this engine serves the address history at all (#899): the Rust engine built
-     * with its Swarm reader, not on mobile. A host consults it before calling, so a call that
+     * with its Swarm reader, not on iOS. A host consults it before calling, so a call that
      * can only be refused does not wake a paused chain. Default false.
      */
     default boolean supportsAddressHistory() {

@@ -136,11 +136,13 @@ getrandom = "=0.4.3"
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 # The EIP-1459 DNS tree walk (#539, part 3): TXT lookups over the system
 # resolver. 0.26.3 for the 0.26.2 security release (DNS response parsing,
-# UDP spoofing and resource-exhaustion fixes). The only hickory that is BUILT:
-# libp2p goes without its `dns` feature (see above). 0.25.2 and libp2p-dns
-# still appear in the locks, because Cargo locks every optional dependency
-# whatever features are on; `cargo tree --target all -i hickory-proto@0.25.2`
-# prints nothing, so a lockfile-based alert for it is code that is not used.
+# UDP spoofing and resource-exhaustion fixes). The only hickory this crate
+# builds: libp2p goes without its `dns` feature here (see above). 0.25.2 and
+# libp2p-dns are in the engine's graph through the Swarm reader alone (ant-p2p,
+# behind myotis-engine's `swarm` feature, which every shipped desktop and
+# Android build turns on since the owner's decision of 2026-11-24:
+# `cargo tree -p myotis-engine --features swarm -i hickory-proto@0.25.2`);
+# the open item is in rust/swarm/src/lib.rs.
 hickory-resolver = { version = "=0.26.3", default-features = false, features = ["system-config", "tokio"] }
 
 [target.'cfg(not(target_os = "android"))'.dependencies]

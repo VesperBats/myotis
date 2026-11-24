@@ -15,15 +15,17 @@
 //! channel ([`ant_control::ControlCommand`]), the in-process interface `antd`'s own control
 //! socket uses.
 //!
-//! **Linked into the engine only behind its off-by-default `swarm` feature, for dev builds:
-//! not ready for a release build** (owner, 2026-11-20: settled before any release that turns
-//! `swarm` on), for reasons inside
-//! ant that this crate cannot switch off:
+//! **Linked into the engine behind its `swarm` feature, which every shipped build turns on**
+//! (desktop and Android; owner's decision, 2026-11-24). It ships with these open items inside
+//! ant, which this crate cannot switch off (on 2026-11-20 the owner had them settled before
+//! any release that turns `swarm` on; they are the owner's to settle again):
 //! - ant listens on `0.0.0.0` and runs libp2p's UPnP behaviour, which asks the local router
 //!   for a port mapping and announces the public address to peers: more than a fetch-only
 //!   reader should expose. (So the tests that start a node are `#[ignore]`d.)
 //! - ant resolves `/dnsaddr` bootnodes with hickory-resolver 0.25.2, the version with known
-//!   advisories that `myotis-net` keeps out of every build on purpose.
+//!   advisories that `myotis-net` keeps out of its own graph on purpose (it is built and
+//!   linked with `swarm`). On Android, which has no `/etc/resolv.conf`, ant falls back to
+//!   Cloudflare's resolver for that lookup.
 //! - ant would run inside the engine under the workspace's `panic = "abort"`: a panic anywhere
 //!   in its networking code, on input from any Swarm peer, would end the host process.
 //!

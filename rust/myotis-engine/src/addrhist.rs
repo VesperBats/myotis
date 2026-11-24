@@ -7,7 +7,8 @@
 //! verified chain data (part 6) says otherwise.
 //!
 //! **Refused with the permanent `-32602`, never an empty list** (the carve-out):
-//! - a build without the reader (no `swarm` feature), and Android and iOS in this version;
+//! - a build without the reader (no `swarm` feature), and iOS (Android reads it: owner's
+//!   decision, 2026-11-24);
 //! - without an importer key (an experimental setting: the user trusts that importer);
 //! - while Tor routing is on (the embedded node does not route through Tor).
 //!
@@ -18,8 +19,8 @@ use crate::eljson;
 
 /// Why every read is refused in a build like this one, if it is.
 fn build_refusal() -> Option<&'static str> {
-    if cfg!(any(target_os = "android", target_os = "ios")) {
-        return Some("the address history is not available on mobile in this version");
+    if cfg!(target_os = "ios") {
+        return Some("the address history is not available on iOS in this version");
     }
     if !cfg!(feature = "swarm") {
         return Some("the address history needs the Swarm reader, which this build does not include");
@@ -1206,7 +1207,7 @@ mod tests {
         let code = |json: String| serde_json::from_str::<serde_json::Value>(&json).unwrap()["code"].clone();
         // Without an importer (or without the reader in this build): -32602, never [].
         let none = refusal(&Config::default()).expect("refused");
-        assert!(none.contains("importer") || none.contains("Swarm reader") || none.contains("mobile"), "{none}");
+        assert!(none.contains("importer") || none.contains("Swarm reader") || none.contains("iOS"), "{none}");
         // The arguments are checked once the reader may run; with the default settings the
         // refusal comes first, so check the shapes through parse_cursor/limit rules here.
         let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();

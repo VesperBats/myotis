@@ -23,9 +23,10 @@ crate-type = ["cdylib", "rlib"]
 tor = ["myotis-net/tor"]
 # The address history from the addr1 index on Swarm (.claude/agent/data-sources.md, the
 # carve-out for Swarm reads of the address index): links the embedded ant node
-# (rust/swarm, rust/vendor/ant). OFF by default and in every shipped build, for dev builds
-# only, until ant's open items (rust/swarm/src/lib.rs, rust/vendor/ant/VENDORED.md) and the
-# advisory watch are settled (owner, 2026-11-20). Without it the history is refused (-32602).
+# (rust/swarm, rust/vendor/ant). Off for a plain `cargo build`; ON in every shipped build
+# (owner's decision, 2026-11-24): Gradle's cargoBuildHost and cargoNdkAndroid turn it on
+# unless -PswarmEngine=false, the iOS archive never. ant's open items are in
+# rust/swarm/src/lib.rs. Without it the history is refused (-32602).
 swarm = ["dep:myotis-swarm"]
 
 [dependencies]

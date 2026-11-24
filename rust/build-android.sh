@@ -24,6 +24,11 @@
 # myotis-engine/tor`: Arti on rustls + ring, SQLite bundled — see the TLS note in
 # myotis-net/Cargo.toml and docs/how-it-works/privacy-and-tor.md). It adds megabytes per ABI,
 # so it stays off unless asked for; Gradle sets it for `-PtorEngine`.
+#
+# MYOTIS_SWARM_ENGINE=1 (the default) links the Swarm reader, the embedded ant node behind
+# the address history (`--features myotis-engine/swarm`; .claude/agent/data-sources.md, the
+# Swarm carve-out), as every shipped build does (owner's decision, 2026-11-24). 0 builds an
+# engine without it, which refuses the history; Gradle sets it from `-PswarmEngine`.
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -43,17 +48,27 @@ cd "$here"
 # libs load on Android 15+ devices with 16 KB memory pages.
 # A plain string, not an array: macOS's bash 3.2 rejects an empty array
 # expansion under `set -u`.
-tor_features=""
+features=""
 case "${MYOTIS_TOR_ENGINE:-0}" in
     0) ;;
     1)
-        tor_features="--features myotis-engine/tor"
+        features="myotis-engine/tor"
         echo "building with Tor (myotis-engine/tor)"
         ;;
     *) echo "MYOTIS_TOR_ENGINE must be 0 or 1 (got '${MYOTIS_TOR_ENGINE}')" >&2; exit 1 ;;
 esac
-# shellcheck disable=SC2086 # $tor_features is empty or two words, split on purpose
-cargo ndk -t arm64-v8a -t x86_64 -o "$jniLibs" build --locked --release -p myotis-bls -p myotis-engine $tor_features
+case "${MYOTIS_SWARM_ENGINE:-1}" in
+    0) echo "building without the Swarm reader (the address history is refused)" ;;
+    1)
+        features="${features:+$features,}myotis-engine/swarm"
+        echo "building with the Swarm reader (myotis-engine/swarm)"
+        ;;
+    *) echo "MYOTIS_SWARM_ENGINE must be 0 or 1 (got '${MYOTIS_SWARM_ENGINE}')" >&2; exit 1 ;;
+esac
+feature_args=""
+[ -z "$features" ] || feature_args="--features $features"
+# shellcheck disable=SC2086 # $feature_args is empty or two words, split on purpose
+cargo ndk -t arm64-v8a -t x86_64 -o "$jniLibs" build --locked --release -p myotis-bls -p myotis-engine $feature_args
 
 # cargo-ndk copies EVERY dynamic library the build graph produces, including
 # hash-named dependency artifacts (e.g. libif_watch-<hash>.so) that

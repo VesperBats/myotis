@@ -65,9 +65,10 @@ ant is on no registry, so no advisory database (RustSec, GitHub advisories, Depe
 alerts) can name it, as a git pin or as a copy. Its registry dependencies stay covered
 through `rust/swarm/Cargo.lock`; ant's own code, which parses what Swarm peers send, is
 not. Nothing reports a security fix in ant: it reaches Myotis only when someone moves this
-copy, and so do fixes for freedom-hq/ant#269, #270 and #271, the three reasons the `swarm`
-feature is not in a release build (`rust/swarm/src/lib.rs`). Who watches ant's commits and
-how often is the owner's to settle, before the engine links it.
+copy, and so do fixes for freedom-hq/ant#269, #270 and #271, the three open items
+`rust/swarm/src/lib.rs` lists. Who watches ant's commits and how often was the owner's to
+settle before a release links it (owner, 2026-11-20); every shipped build links it since the
+owner's decision of 2026-11-24, which lands after that watch.
 
 ## The SBOM
 
