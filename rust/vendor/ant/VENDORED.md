@@ -1,7 +1,7 @@
 # ant, vendored
 
 Upstream: https://github.com/freedom-hq/ant
-Commit: b138f6bc074d8c28149017d4e7b1e80db8c67d4d
+Commit: 45732f979322900023614ba202010ff15edb38f3
 License: MIT OR Apache-2.0 (`LICENSE-MIT`, `LICENSE-APACHE`, copied with the crates)
 
 The embedded Swarm node behind `rust/swarm` (crate `myotis-swarm`, the reader of the addr1

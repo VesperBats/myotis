@@ -31,9 +31,9 @@ Closes #269
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ---
- crates/ant-node/src/lib.rs      |  65 +++++++++++++
- crates/ant-p2p/src/behaviour.rs | 159 +++++++++++++++++++++++++++-----
- 2 files changed, 203 insertions(+), 21 deletions(-)
+ crates/ant-node/src/lib.rs      |  65 ++++++++++++++++
+ crates/ant-p2p/src/behaviour.rs | 160 ++++++++++++++++++++++++++++++++++------
+ 2 files changed, 204 insertions(+), 21 deletions(-)
 
 diff --git a/crates/ant-node/src/lib.rs b/crates/ant-node/src/lib.rs
 index 38e946b..b1af987 100644
@@ -137,7 +137,7 @@ index 38e946b..b1af987 100644
 +    }
 +}
 diff --git a/crates/ant-p2p/src/behaviour.rs b/crates/ant-p2p/src/behaviour.rs
-index 9293e8d..f538b0f 100644
+index d399b29..eccdb57 100644
 --- a/crates/ant-p2p/src/behaviour.rs
 +++ b/crates/ant-p2p/src/behaviour.rs
 @@ -55,6 +55,10 @@ pub enum RunError {
@@ -170,22 +170,23 @@ index 9293e8d..f538b0f 100644
      /// Live status view maintained by the swarm loop; read by the control
      /// socket server.
      pub status: Option<watch::Sender<StatusSnapshot>>,
-@@ -309,10 +325,10 @@ pub struct AntBehaviour {
-     /// `/ip4/<wan>/tcp/<port>` multiaddr. Treated as opportunistic: on
-     /// hosts without an IGD-capable router (cloud VMs, corporate NAT,
-     /// CGNAT) the behaviour just emits `GatewayNotFound` /
--    /// `NonRoutableGateway` and stays quiet, so leaving it always-on is
--    /// safe — handlers in `apply_event` only ever *add* addresses, never
--    /// reject existing ones.
--    upnp: libp2p::upnp::tokio::Behaviour,
-+    /// `NonRoutableGateway` and stays quiet — handlers in `apply_event`
-+    /// only ever *add* addresses, never reject existing ones. Disabled
-+    /// on an outbound-only node ([`RunConfig::outbound_only`]).
-+    upnp: libp2p::swarm::behaviour::toggle::Toggle<libp2p::upnp::tokio::Behaviour>,
+@@ -324,10 +340,11 @@ mod derived {
+         /// `/ip4/<wan>/tcp/<port>` multiaddr. Treated as opportunistic: on
+         /// hosts without an IGD-capable router (cloud VMs, corporate NAT,
+         /// CGNAT) the behaviour just emits `GatewayNotFound` /
+-        /// `NonRoutableGateway` and stays quiet, so leaving it always-on is
+-        /// safe — handlers in `apply_event` only ever *add* addresses, never
+-        /// reject existing ones.
+-        pub(super) upnp: libp2p::upnp::tokio::Behaviour,
++        /// `NonRoutableGateway` and stays quiet — handlers in `apply_event`
++        /// only ever *add* addresses, never reject existing ones. Disabled
++        /// on an outbound-only node
++        /// ([`RunConfig::outbound_only`](super::RunConfig::outbound_only)).
++        pub(super) upnp: libp2p::swarm::behaviour::toggle::Toggle<libp2p::upnp::tokio::Behaviour>,
+     }
  }
  
- /// How often the swarm loop runs its connection liveness pass
-@@ -828,6 +844,8 @@ struct SwarmState {
+@@ -844,6 +861,8 @@ struct SwarmState {
      hint_queue: VecDeque<sinks::PeerHint>,
      /// [`RunConfig::allow_private_dials`]: skip the peer-underlay filter.
      allow_private_dials: bool,
@@ -194,7 +195,7 @@ index 9293e8d..f538b0f 100644
      /// Cached snapshot of this host's subnets for the same-LAN exception
      /// of the underlay filter, with the time it was taken.
      local_subnets: Option<(Instant, crate::underlay::LocalSubnets)>,
-@@ -1107,6 +1125,7 @@ impl SwarmState {
+@@ -1123,6 +1142,7 @@ impl SwarmState {
              seen_hints: HashSet::new(),
              hint_queue: VecDeque::new(),
              allow_private_dials: false,
@@ -202,7 +203,7 @@ index 9293e8d..f538b0f 100644
              local_subnets: None,
              dial_backoff: HashMap::new(),
              target_peers,
-@@ -1849,6 +1868,18 @@ fn local_overlay_from_secret(
+@@ -1864,6 +1884,18 @@ fn local_overlay_from_secret(
      overlay_from_ethereum_address(&eth, network_id, overlay_nonce)
  }
  
@@ -221,7 +222,7 @@ index 9293e8d..f538b0f 100644
  /// Run forever. Keeps a running handshake pipeline (capacity =
  /// `target_peers`) fed by two sources: the static bootnode list (bootstrap
  /// only) and live `/swarm/hive/1.1.0/peers` gossip from every connected
-@@ -1857,12 +1888,21 @@ fn local_overlay_from_secret(
+@@ -1872,12 +1904,21 @@ fn local_overlay_from_secret(
  /// `target_peers` and the dialer stops pulling from the hint queue.
  pub async fn run(mut cfg: RunConfig) -> Result<(), RunError> {
      let local_peer_id = cfg.libp2p_keypair.public().to_peer_id();
@@ -248,7 +249,7 @@ index 9293e8d..f538b0f 100644
  
      // Deferred operator warning: if neither user-supplied externals, listener
      // auto-promotion, nor UPnP have produced a globally-routable address by
-@@ -1871,8 +1911,10 @@ pub async fn run(mut cfg: RunConfig) -> Result<(), RunError> {
+@@ -1886,8 +1927,10 @@ pub async fn run(mut cfg: RunConfig) -> Result<(), RunError> {
      // seconds and listener-address auto-promotion happens in the run loop —
      // an eager check would always fire on home routers where UPnP would have
      // succeeded a moment later. The deadline is checked from the main loop
@@ -261,7 +262,7 @@ index 9293e8d..f538b0f 100644
  
      let mut control = swarm.behaviour().stream.new_control();
      let mut peer_agents: HashMap<PeerId, String> = HashMap::new();
-@@ -1922,6 +1964,7 @@ pub async fn run(mut cfg: RunConfig) -> Result<(), RunError> {
+@@ -1937,6 +1980,7 @@ pub async fn run(mut cfg: RunConfig) -> Result<(), RunError> {
      }
      state.credit_ledger = credit_ledger;
      state.allow_private_dials = cfg.allow_private_dials;
@@ -269,7 +270,7 @@ index 9293e8d..f538b0f 100644
      state.swap_enabled = cfg.swap_enabled;
      state.status = cfg.status.clone();
      publish_settlement(&state);
-@@ -8803,7 +8846,9 @@ fn handle_swarm_event(
+@@ -8814,7 +8858,9 @@ fn handle_swarm_event(
      ev: SwarmEvent<AntBehaviourEvent>,
  ) {
      match ev {
@@ -280,7 +281,7 @@ index 9293e8d..f538b0f 100644
              // Advertise non-loopback listeners as external addresses so that
              // our identify message carries usable `listen_addrs`. Without this
              // bee's inbound handshake handler waits 10 s in `peerMultiaddrs`
-@@ -8814,8 +8859,9 @@ fn handle_swarm_event(
+@@ -8825,8 +8871,9 @@ fn handle_swarm_event(
          // a candidate here. Promote globally-routable ones to confirmed
          // external addresses so the next outbound identify carries our
          // NAT-punched public multiaddr and bee's peerstore accepts it.
@@ -291,7 +292,7 @@ index 9293e8d..f538b0f 100644
          {
              record_external_address(state, swarm, status, address, ExternalAddrSource::Observed);
          }
-@@ -9766,9 +9812,11 @@ fn resolver_config() -> dns::ResolverConfig {
+@@ -9777,9 +9824,11 @@ fn resolver_config() -> dns::ResolverConfig {
      }
  }
  
@@ -303,7 +304,7 @@ index 9293e8d..f538b0f 100644
  ) -> Result<Swarm<AntBehaviour>, RunError> {
      // `push_listen_addr_updates` triggers an identify-push whenever our
      // listener set changes. That matters for bee: if a later listener arrives
-@@ -9787,7 +9835,7 @@ fn build_swarm(
+@@ -9798,7 +9847,7 @@ fn build_swarm(
                  .with_interval(liveness.ping_interval)
                  .with_timeout(liveness.ping_timeout),
          ),
@@ -312,7 +313,7 @@ index 9293e8d..f538b0f 100644
      };
  
      let swarm = SwarmBuilder::with_existing_identity(keypair)
-@@ -9977,7 +10025,7 @@ mod tests {
+@@ -9988,7 +10037,7 @@ mod tests {
          let cfg = FAST_LIVENESS;
          let proto = StreamProtocol::new("/ant/test/sink/1.0.0");
          // Remote: a plain node of ours on loopback, frozen on demand.
@@ -321,7 +322,7 @@ index 9293e8d..f538b0f 100644
          remote
              .listen_on("/ip4/127.0.0.1/tcp/0".parse().unwrap())
              .unwrap();
-@@ -10010,7 +10058,7 @@ mod tests {
+@@ -10021,7 +10070,7 @@ mod tests {
          // forwarding but keeps both sockets open. Nothing reaches either
          // side any more and nobody sees a FIN or RST: a half-open link.
          let (proxy_addr, freeze) = freezable_tcp_relay(&remote_addr).await;
@@ -330,7 +331,7 @@ index 9293e8d..f538b0f 100644
          let mut state = test_state();
          state.liveness = Liveness::new(cfg, Instant::now());
          let (status_tx, status_rx) = watch::channel(StatusSnapshot::default());
-@@ -10131,7 +10179,8 @@ mod tests {
+@@ -10142,7 +10191,8 @@ mod tests {
      /// visible as the cleared hint dedup), once per cooldown window.
      #[tokio::test]
      async fn link_failure_streak_triggers_one_self_heal_per_window() {
@@ -340,7 +341,7 @@ index 9293e8d..f538b0f 100644
          let mut state = test_state();
          let (dial_tx, _dial_rx) = mpsc::channel::<Multiaddr>(8);
          let (mut backoff, mut last_boot, mut last_top_up) =
-@@ -10181,13 +10230,81 @@ mod tests {
+@@ -10192,13 +10242,81 @@ mod tests {
          assert_eq!(backoff, MAX_BACKOFF);
      }
  
@@ -423,7 +424,7 @@ index 9293e8d..f538b0f 100644
          remote
              .listen_on("/ip4/127.0.0.1/tcp/0".parse().unwrap())
              .unwrap();
-@@ -10202,7 +10319,7 @@ mod tests {
+@@ -10213,7 +10331,7 @@ mod tests {
                  remote.select_next_some().await;
              }
          });
@@ -432,7 +433,7 @@ index 9293e8d..f538b0f 100644
          let mut state = test_state();
          let (status_tx, status_rx) = watch::channel(StatusSnapshot::default());
          let mut control = ours.behaviour().stream.new_control();
-@@ -10279,7 +10396,7 @@ mod tests {
+@@ -10290,7 +10408,7 @@ mod tests {
      #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
      async fn duplicate_dialer_connection_clears_dial_start_markers() {
          let cfg = FAST_LIVENESS;
@@ -441,7 +442,7 @@ index 9293e8d..f538b0f 100644
          remote
              .listen_on("/ip4/127.0.0.1/tcp/0".parse().unwrap())
              .unwrap();
-@@ -10294,7 +10411,7 @@ mod tests {
+@@ -10305,7 +10423,7 @@ mod tests {
                  remote.select_next_some().await;
              }
          });

@@ -42,8 +42,11 @@ its trust anchors and release checks.
   cold start takes about 10 s longer before the first read, the time bee
   waits for the identify addresses of a peer that advertises none. Three
   patches to the vendored ant (`rust/vendor/ant-patches`), sent upstream as
-  freedom-hq/ant#276, #277 and #278. A panic in ant still ends the host
-  process (freedom-hq/ant#271, accepted for now) (#920).
+  freedom-hq/ant#276, #277 and #278. ant is vendored at 0.5.79 (commit
+  45732f9), with upstream's fix for a crash on a malformed underlay list
+  from a peer (freedom-hq/ant#279) and checked bounds in chunk encryption.
+  Any other panic in ant still ends the host process (freedom-hq/ant#271,
+  accepted for now) (#920).
 
 ## [0.1.22] - 2026-11-23
 
