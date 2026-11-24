@@ -19,14 +19,28 @@ its trust anchors and release checks.
 
 ## [Unreleased]
 
+## [0.1.23] - 2026-11-24
+
 ### Changed
 
+- Engine ABI 60 (unchanged from 0.1.22).
 - Address history: the Swarm reader ships in the desktop and Android builds
   (owner's decision, 2026-11-24): the daemon, the desktop installers, the
   engine library's desktop natives and Android AAR, and the Android app
   (`-PswarmEngine` is on by default; `-PswarmEngine=false` opts out). iOS, the
   Java and Go engines, and every engine while Tor routing is on still refuse
   the history with `-32602` (#920).
+- Trust anchors: the embedded checkpoints of mainnet, Gnosis and Sepolia
+  moved to 2026-11-24 (mainnet slot 15,725,824, Gnosis slot 31,308,384,
+  Sepolia slot 11,650,048) in the Java and Rust engines, and mainnet's in the
+  Go engine too. `refreshCheckpoint` now writes only a root the pinned CL
+  servers serve a light-client bootstrap for (#918). The checkpoint table
+  extends to block 26,485,995, cross-checked against a second node. The
+  mainnet bootnodes still equal go-ethereum's, and the seven pinned Swarm
+  bootnodes still equal what `/dnsaddr/mainnet.ethswarm.org` resolves to in
+  every region.
+- Go engine: go-ethereum 1.17.0 (from 1.16.9), with pion/dtls 3.1.4 and
+  pion/stun 3.1.5 (#921).
 
 ### Security
 
@@ -729,7 +743,8 @@ MetaMask; ENS with CCIP-Read; mainnet and Gnosis Chain; the Android app, the
 shared Compose Multiplatform UI and the macOS dmg; and `:myotis-api`, the
 engine contract (#1 to #123).
 
-[Unreleased]: https://github.com/biafra23/myotis/compare/v0.1.22...HEAD
+[Unreleased]: https://github.com/biafra23/myotis/compare/v0.1.23...HEAD
+[0.1.23]: https://github.com/biafra23/myotis/compare/v0.1.22...v0.1.23
 [0.1.22]: https://github.com/biafra23/myotis/compare/v0.1.21...v0.1.22
 [0.1.21]: https://github.com/biafra23/myotis/compare/v0.1.21-rc1...v0.1.21
 [0.1.21-rc1]: https://github.com/biafra23/myotis/compare/v0.1.20...v0.1.21-rc1
