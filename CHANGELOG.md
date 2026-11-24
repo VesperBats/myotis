@@ -29,7 +29,10 @@ its trust anchors and release checks.
   engine library's desktop natives and Android AAR, and the Android app
   (`-PswarmEngine` is on by default; `-PswarmEngine=false` opts out). iOS, the
   Java and Go engines, and every engine while Tor routing is on still refuse
-  the history with `-32602` (#920).
+  the history with `-32602` (#920). The reader adds about 5.2 MB to
+  `libmyotis_engine` on Android arm64-v8a and about 6.0 MB on x86_64 (#920);
+  the published engine library (AAR and desktop natives) always includes it,
+  as `-PswarmEngine=false` exists only for a build from source.
 - Trust anchors: the embedded checkpoints of mainnet, Gnosis and Sepolia
   moved to 2026-11-24 (mainnet slot 15,725,824, Gnosis slot 31,308,384,
   Sepolia slot 11,650,048) in the Java and Rust engines, and mainnet's in the
@@ -60,7 +63,9 @@ its trust anchors and release checks.
   45732f9), with upstream's fix for a crash on a malformed underlay list
   from a peer (freedom-hq/ant#279) and checked bounds in chunk encryption.
   Any other panic in ant still ends the host process (freedom-hq/ant#271,
-  accepted for now) (#920).
+  accepted for now) (#920). No earlier release shipped the reader (before
+  0.1.23 it was in development builds only, `-PswarmEngine` or `--features
+  swarm`), so no released build was affected.
 
 ## [0.1.22] - 2026-11-23
 
@@ -90,7 +95,7 @@ its trust anchors and release checks.
   26,476,643, cross-checked against a second node. The mainnet bootnodes still
   equal go-ethereum's.
 
-## [0.1.21] - 2026-11-22
+## [0.1.21] - 2026-11-23
 
 ### Added
 
