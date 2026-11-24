@@ -4721,7 +4721,7 @@ dependencies = [
 
 [[package]]
 name = "myotis-addr1"
-version = "0.1.22"
+version = "0.1.23"
 dependencies = [
  "k256",
  "myotis-core",
@@ -4729,7 +4729,7 @@ dependencies = [
 
 [[package]]
 name = "myotis-bls"
-version = "0.1.22"
+version = "0.1.23"
 dependencies = [
  "blst",
  "jni",
@@ -4737,7 +4737,7 @@ dependencies = [
 
 [[package]]
 name = "myotis-consensus"
-version = "0.1.22"
+version = "0.1.23"
 dependencies = [
  "blst",
  "myotis-bls",
@@ -4747,7 +4747,7 @@ dependencies = [
 
 [[package]]
 name = "myotis-core"
-version = "0.1.22"
+version = "0.1.23"
 dependencies = [
  "k256",
  "sha2 0.10.9",
@@ -4756,7 +4756,7 @@ dependencies = [
 
 [[package]]
 name = "myotis-engine"
-version = "0.1.22"
+version = "0.1.23"
 dependencies = [
  "libc",
  "myotis-addr1",
@@ -4775,7 +4775,7 @@ dependencies = [
 
 [[package]]
 name = "myotis-evm"
-version = "0.1.22"
+version = "0.1.23"
 dependencies = [
  "myotis-core",
  "revm",
@@ -4784,7 +4784,7 @@ dependencies = [
 
 [[package]]
 name = "myotis-net"
-version = "0.1.22"
+version = "0.1.23"
 dependencies = [
  "alloy-rlp",
  "arti-client",
@@ -4813,7 +4813,7 @@ dependencies = [
 
 [[package]]
 name = "myotis-node"
-version = "0.1.22"
+version = "0.1.23"
 dependencies = [
  "myotis-engine",
  "napi",
@@ -4824,7 +4824,7 @@ dependencies = [
 
 [[package]]
 name = "myotis-rpcd"
-version = "0.1.22"
+version = "0.1.23"
 dependencies = [
  "clap",
  "myotis-engine",
@@ -4850,7 +4850,7 @@ dependencies = [
 
 [[package]]
 name = "myotis-wire"
-version = "0.1.22"
+version = "0.1.23"
 dependencies = [
  "aes 0.9.4",
  "cipher 0.5.2",
