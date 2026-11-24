@@ -1,0 +1,63 @@
+# ant upstream watch — who watches ant for security fixes (owner's decision,
+# 2026-11-24): this workflow, daily, and the owner, acting on the issue it opens.
+#
+# ant (https://github.com/freedom-hq/ant) is vendored at rust/vendor/ant, at the
+# commit its VENDORED.md records (checked by vendored-ant.yml). It is on no
+# registry, so no advisory database (RustSec, GitHub advisories, Dependabot) can
+# name it: a security fix upstream reaches Myotis only when the copy is moved.
+# scripts/ant_upstream_watch.sh compares upstream's default branch with the
+# vendored commit and reports, as ONE issue labelled `ant-upstream` and assigned
+# to the owner: the commits since it (the newest, and those whose message reads
+# like a security fix), the tags and releases on them, upstream's published
+# security advisories (or that they could not be read), and the three upstream
+# issues that keep the `swarm` feature out of a release build.
+#
+# Quiet by design: an unchanged report writes nothing; a changed one rewrites the
+# open issue and adds one comment; a report the last closed issue already made is
+# not opened again. It never re-vendors and never closes an issue: moving the copy
+# (scripts/vendor_ant.sh) and whether a release follows are the owner's.
+#
+# Triggers: the daily schedule and workflow_dispatch report; a pull request that
+# changes the watch runs it with --dry-run (prints the report, writes nothing), so
+# the reads are proven with the job's own token before the merge. Read-only on
+# freedom-hq/ant; the job's GITHUB_TOKEN with issues: write on this repository.
+name: ant upstream watch
+
+on:
+  schedule:
+    - cron: "17 5 * * *"   # daily at 05:17 UTC
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "scripts/ant_upstream_watch.sh"
+      - ".github/workflows/ant-upstream-watch.yml"
+
+permissions: {}
+
+concurrency:
+  # One report at a time: two runs could otherwise both open an issue.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    name: upstream ant against rust/vendor/ant
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Compare and report
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRY_RUN: ${{ github.event_name == 'pull_request' }}
+        run: |
+          if [ "$DRY_RUN" = true ]; then
+            scripts/ant_upstream_watch.sh --dry-run
+          else
+            scripts/ant_upstream_watch.sh
+          fi
