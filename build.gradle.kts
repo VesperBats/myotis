@@ -1050,8 +1050,12 @@ extra["torEngine"] = torEngine
 // linking the embedded ant node into the HOST library (cargoBuildHost) for the daemon
 // and the desktop app, so they can serve the address history. Dev builds only, OFF by
 // default and in every shipped artifact (owner, 2026-11-20: who watches ant for security
-// fixes is settled before a release turns it on). Android and iOS refuse the history in
-// this version, so cargoNdkAndroid does not take it. Spelled like -PtorEngine.
+// fixes is settled before a release turns it on). Settled (owner's decision, 2026-11-24):
+// .github/workflows/ant-upstream-watch.yml compares upstream ant with the vendored commit
+// daily and reports what is new in one `ant-upstream` issue; the owner, acting on it,
+// decides on re-vendoring and a release. Turning the reader on in a release is a change
+// of its own. Android and iOS refuse the history in this version, so cargoNdkAndroid does
+// not take it. Spelled like -PtorEngine.
 val swarmEngine = project.hasProperty("swarmEngine") &&
     (project.property("swarmEngine") as? String).let {
         when (it?.trim()?.lowercase()) {
