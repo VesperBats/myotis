@@ -19,6 +19,15 @@ its trust anchors and release checks.
 
 ## [Unreleased]
 
+### Changed
+
+- Address history: the Swarm reader ships in the desktop and Android builds
+  (owner's decision, 2026-11-24): the daemon, the desktop installers, the
+  engine library's desktop natives and Android AAR, and the Android app
+  (`-PswarmEngine` is on by default; `-PswarmEngine=false` opts out). iOS, the
+  Java and Go engines, and every engine while Tor routing is on still refuse
+  the history with `-32602` (#920).
+
 ### Security
 
 - Swarm reader (the embedded `ant` node behind the address history): it is
@@ -81,14 +90,11 @@ its trust anchors and release checks.
   block. If a walk finds another hash at the table's top, an alarm refuses
   every read resting on the table (`-32602`), is kept across restarts, and
   every host shows it as "Trust anchors disagree" (#900–#904, #908).
-- Address history: `myotis_getAddressHistory` reads an address's entries
+- Address history, in development builds only (`-PswarmEngine`, `myotis-rpcd
+  --features swarm`): `myotis_getAddressHistory` reads an address's entries
   from the addr1 index on Swarm through an embedded `ant` light node, and
   `myotis_verifyAddressHistoryEntries` checks each against verified chain data.
-  Also on the daemon's IPC. The reader ships in the desktop and Android
-  builds: the daemon, the desktop installers, the engine library's desktop
-  natives and Android AAR, and the Android app (`-PswarmEngine` is on by
-  default; `-PswarmEngine=false` opts out). iOS, the Java and Go engines,
-  and every engine while Tor routing is on refuse both with `-32602`.
+  Also on the daemon's IPC. Every shipped build refuses both with `-32602`.
   Guide: `docs/guides/address-history.md` (#891–#907).
 - API: `StatusSnapshot.checkpointAlarm`; `VerifiedReads` gains the address
   history calls and `MyotisEngine.setAddressHistoryConfigJson`, refusing by
