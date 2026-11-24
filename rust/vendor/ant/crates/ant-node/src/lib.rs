@@ -34,6 +34,16 @@ pub struct NodeConfig {
     /// Forwarded to `ant_p2p::RunConfig::allow_private_dials`: dial peers'
     /// private/loopback underlays even off-LAN. Dev/test networks only.
     pub allow_private_dials: bool,
+    /// Forwarded to `ant_p2p::RunConfig::outbound_only`: no listener, no
+    /// `UPnP`, no external address advertised. For embedders that only
+    /// fetch. `false` (the default) keeps the full node behaviour; with
+    /// `true`, non-empty [`Self::external_addrs`] make [`run_node`] fail.
+    pub outbound_only: bool,
+    /// Forwarded to `ant_p2p::RunConfig::public_dials_only`: dial globally
+    /// routable underlays only, never a private one, not even on this
+    /// host's own LAN. For embedders that only fetch. `false` (the
+    /// default) keeps the same-LAN exception.
+    pub public_dials_only: bool,
     /// Optional live status sink written to by the node loop.
     pub status: Option<watch::Sender<StatusSnapshot>>,
     /// Where to persist the warm-restart peer snapshot. `None` disables it.
@@ -151,6 +161,8 @@ impl NodeConfig {
             libp2p_keypair,
             external_addrs: Vec::new(),
             allow_private_dials: false,
+            outbound_only: false,
+            public_dials_only: false,
             status: None,
             peerstore_path: None,
             commands: None,
@@ -194,6 +206,20 @@ impl NodeConfig {
     #[must_use]
     pub const fn with_allow_private_dials(mut self, allow: bool) -> Self {
         self.allow_private_dials = allow;
+        self
+    }
+
+    /// See [`Self::outbound_only`].
+    #[must_use]
+    pub const fn with_outbound_only(mut self, outbound_only: bool) -> Self {
+        self.outbound_only = outbound_only;
+        self
+    }
+
+    /// See [`Self::public_dials_only`].
+    #[must_use]
+    pub const fn with_public_dials_only(mut self, public_only: bool) -> Self {
+        self.public_dials_only = public_only;
         self
     }
 
@@ -325,6 +351,8 @@ pub async fn run_node(cfg: NodeConfig) -> Result<(), NodeError> {
         libp2p_keypair: cfg.libp2p_keypair,
         external_addrs: cfg.external_addrs,
         allow_private_dials: cfg.allow_private_dials,
+        outbound_only: cfg.outbound_only,
+        public_dials_only: cfg.public_dials_only,
         status: cfg.status,
         // `None` → 0 → `ant_p2p` falls back to `DEFAULT_TARGET_PEERS = 100`.
         // `Some(n)` is forwarded literally; values above bee's typical
@@ -478,5 +506,56 @@ async fn intercept_commands(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    fn node(outbound_only: bool) -> (NodeConfig, watch::Receiver<StatusSnapshot>) {
+        let (tx, rx) = watch::channel(StatusSnapshot::default());
+        let cfg = NodeConfig::mainnet_default(
+            ant_crypto::random_secp256k1_secret(),
+            ant_crypto::random_overlay_nonce(),
+            Vec::new(),
+            Keypair::generate_ed25519(),
+        )
+        .with_network_id(4020)
+        .with_status(tx)
+        .with_outbound_only(outbound_only);
+        (cfg, rx)
+    }
+
+    /// Issue #269, end to end through `run_node`: an outbound-only node
+    /// runs without opening a listener (a listener shows up in the
+    /// status snapshot within milliseconds of the swarm's first poll) and
+    /// without an external address, and external addresses configured
+    /// for one are refused at start. (No bootnodes: nothing is dialed.)
+    #[tokio::test]
+    async fn an_outbound_only_node_opens_no_listener() {
+        let (cfg, status) = node(true);
+        let task = tokio::spawn(run_node(cfg));
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        assert!(!task.is_finished(), "the node stopped");
+        let st = status.borrow().clone();
+        assert!(st.listeners.is_empty(), "listening on {:?}", st.listeners);
+        assert!(
+            st.external_addresses.is_empty(),
+            "advertising {:?}",
+            st.external_addresses
+        );
+        task.abort();
+
+        let (cfg, _status) = node(true);
+        let cfg = cfg.with_external_addrs(vec!["/ip4/203.0.113.10/tcp/1634".parse().unwrap()]);
+        let got = tokio::time::timeout(Duration::from_secs(5), run_node(cfg))
+            .await
+            .expect("refused at start");
+        assert!(
+            matches!(got, Err(NodeError::P2p(ant_p2p::RunError::Config(_)))),
+            "{got:?}"
+        );
     }
 }

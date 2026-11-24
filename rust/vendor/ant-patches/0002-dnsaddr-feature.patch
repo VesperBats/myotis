@@ -1,0 +1,286 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Dirk=20J=C3=A4ckel?= <github@dirk.jaeckel.name>
+Date: Tue, 24 Nov 2026 08:40:06 +0100
+Subject: [PATCH] p2p: `dnsaddr` feature for DNS, so ant can be built without
+ hickory
+
+Myotis: the change of https://github.com/freedom-hq/ant/pull/277 (issue #270),
+rebased onto b138f6bc074d8c28149017d4e7b1e80db8c67d4d and limited to the vendored
+files (the PR's crates/ant-ffi/Cargo.toml, .github/workflows/ci.yml and AGENTS.md
+changes are left out). Drop this patch when upstream has merged the PR
+(rust/vendor/ant/VENDORED.md, "Patches").
+
+ant-p2p resolves `/dnsaddr/` bootnodes with hickory-resolver 0.25 and
+dials `/dns*/` addresses through libp2p's DNS transport, which pins
+hickory 0.25 too. Embedders that resolve names themselves, or pass
+bootnodes as IP multiaddrs, have no way to leave either out.
+
+Both are now ant-p2p's `dnsaddr` feature, on by default (and forwarded
+by ant-node's `dnsaddr`, also default): nothing changes for antd,
+ant-ffi or anyone on default features. With it off:
+
+- hickory-resolver and libp2p-dns are not built (the workspace's libp2p
+  no longer enables `dns`; `dnsaddr` does);
+- the `dnsaddr` module and `default_mainnet_bootnodes()` (a `/dnsaddr/`
+  entry) are not compiled;
+- a bootnode named by DNS (`/dnsaddr/`, `/dns/`, `/dns4/`, `/dns6/`) is
+  refused at start with `RunError::DnsBootnode`, while IP multiaddr
+  bootnodes are dialed as given.
+
+ant-ffi, which uses `default_mainnet_bootnodes()` with default features
+off, asks for `dnsaddr` explicitly; `cheque_smoke` requires it. CI builds,
+lints and tests ant-p2p without the feature and checks that hickory and
+libp2p-dns are then not in ant-node's graph on any target.
+
+Closes #270
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ Cargo.toml                      |  2 +-
+ crates/ant-node/Cargo.toml      |  4 +-
+ crates/ant-p2p/Cargo.toml       | 12 +++++-
+ crates/ant-p2p/src/behaviour.rs | 69 +++++++++++++++++++++++++++++++--
+ crates/ant-p2p/src/lib.rs       |  8 +++-
+ 5 files changed, 86 insertions(+), 9 deletions(-)
+
+diff --git a/Cargo.toml b/Cargo.toml
+index 6eb2bb9..799cd66 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -36,8 +36,8 @@ clap = { version = "4.5.37", features = ["derive"] }
+ hex = "0.4.3"
+ hyper = "1.9.0"
+ k256 = { version = "0.13.4", features = ["digest", "ecdh", "ecdsa", "sha256"] }
++# No `dns` here: ant-p2p's `dnsaddr` feature turns it on (issue #270).
+ libp2p = { version = "0.56.0", features = [
+-  "dns",
+   "ecdsa",
+   "identify",
+   "macros",
+diff --git a/crates/ant-node/Cargo.toml b/crates/ant-node/Cargo.toml
+index e8cb2a7..ee3372b 100644
+--- a/crates/ant-node/Cargo.toml
++++ b/crates/ant-node/Cargo.toml
+@@ -33,8 +33,10 @@ tempfile = "3.27.0"
+ tokio = { workspace = true, features = ["test-util"] }
+ 
+ [features]
+-default = ["chain-rpc"]
++default = ["chain-rpc", "dnsaddr"]
+ chain-rpc = ["ant-p2p/chain-rpc"]
++# See ant-p2p's `dnsaddr` feature (issue #270).
++dnsaddr = ["ant-p2p/dnsaddr"]
+ 
+ [lints]
+ workspace = true
+diff --git a/crates/ant-p2p/Cargo.toml b/crates/ant-p2p/Cargo.toml
+index f667e79..707d07d 100644
+--- a/crates/ant-p2p/Cargo.toml
++++ b/crates/ant-p2p/Cargo.toml
+@@ -8,6 +8,7 @@ license.workspace = true
+ [[example]]
+ name = "cheque_smoke"
+ path = "examples/cheque_smoke.rs"
++required-features = ["dnsaddr"]
+ 
+ [dependencies]
+ # `default-features = false` cuts the `chain-rpc` chain (reqwest +
+@@ -26,7 +27,7 @@ base64 = "0.22.1"
+ futures = "0.3.31"
+ hex.workspace = true
+ if-addrs = "0.15.0"
+-hickory-resolver = { version = "0.25.2", default-features = false, features = [
++hickory-resolver = { version = "0.25.2", default-features = false, optional = true, features = [
+   "system-config",
+   "tokio"
+ ] }
+@@ -54,8 +55,15 @@ tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
+ tokio = { workspace = true, features = ["test-util"] }
+ 
+ [features]
+-default = ["chain-rpc"]
++default = ["chain-rpc", "dnsaddr"]
+ chain-rpc = ["ant-chain/chain-rpc"]
++# DNS for peers' addresses: `/dnsaddr/` bootnodes resolved through
++# hickory-resolver (the `dnsaddr` module) and `/dns*/` addresses dialed
++# through libp2p's DNS transport. Without it neither is built, ant makes
++# no DNS query of its own, and a bootnode with a DNS name is refused at
++# start (`RunError::DnsBootnode`): for embedders that pass bootnodes as
++# IP multiaddrs (issue #270).
++dnsaddr = ["dep:hickory-resolver", "libp2p/dns"]
+ 
+ [lints]
+ workspace = true
+diff --git a/crates/ant-p2p/src/behaviour.rs b/crates/ant-p2p/src/behaviour.rs
+index f538b0f..f4ce342 100644
+--- a/crates/ant-p2p/src/behaviour.rs
++++ b/crates/ant-p2p/src/behaviour.rs
+@@ -2,6 +2,7 @@
+ 
+ use crate::bounded_close::BoundedClose;
+ use crate::dial::endpoint_host;
++#[cfg(feature = "dnsaddr")]
+ use crate::dnsaddr;
+ use crate::handshake::{
+     handshake_outbound, HandshakeError, HandshakeInfo, PROTOCOL_HANDSHAKE_V14,
+@@ -28,13 +29,15 @@ use k256::ecdsa::{SigningKey, VerifyingKey};
+ use libp2p::core::connection::ConnectedPoint;
+ use libp2p::core::muxing::StreamMuxerBox;
+ use libp2p::core::Transport as _;
++#[cfg(feature = "dnsaddr")]
++use libp2p::dns;
+ use libp2p::identify;
+ use libp2p::identity::Keypair;
+ use libp2p::multiaddr::Multiaddr;
+ use libp2p::ping;
+ use libp2p::swarm::dial_opts::DialOpts;
+ use libp2p::swarm::{DialError, SwarmEvent};
+-use libp2p::{dns, noise, tcp, yamux, PeerId, StreamProtocol, Swarm, SwarmBuilder};
++use libp2p::{noise, tcp, yamux, PeerId, StreamProtocol, Swarm, SwarmBuilder};
+ use libp2p_stream::Control;
+ use std::collections::{HashMap, HashSet, VecDeque};
+ use std::path::PathBuf;
+@@ -59,6 +62,14 @@ pub enum RunError {
+     /// addresses on an outbound-only node).
+     #[error("config: {0}")]
+     Config(String),
++    /// A bootnode names a host by DNS (`/dnsaddr/`, `/dns/`, `/dns4/`,
++    /// `/dns6/`) in a build without the `dnsaddr` feature, which resolves
++    /// no names.
++    #[error(
++        "bootnode {0} needs DNS, which this build of ant-p2p leaves out (its `dnsaddr` \
++         feature is off): pass /ip4/ or /ip6/ multiaddrs"
++    )]
++    DnsBootnode(Multiaddr),
+ }
+ 
+ /// Postage stamping + signing key wired at daemon startup for pushsync uploads.
+@@ -1888,6 +1899,10 @@ fn check_outbound_only(outbound_only: bool, external_addrs: &[Multiaddr]) -> Res
+ /// `target_peers` and the dialer stops pulling from the hint queue.
+ pub async fn run(mut cfg: RunConfig) -> Result<(), RunError> {
+     let local_peer_id = cfg.libp2p_keypair.public().to_peer_id();
++    #[cfg(not(feature = "dnsaddr"))]
++    if let Some(addr) = first_dns_multiaddr(&cfg.bootnodes) {
++        return Err(RunError::DnsBootnode(addr.clone()));
++    }
+     check_outbound_only(cfg.outbound_only, &cfg.external_addrs)?;
+     let mut swarm = build_swarm(
+         cfg.libp2p_keypair.clone(),
+@@ -9713,7 +9728,12 @@ fn spawn_bootstrap_dial(bootnodes: &[Multiaddr], dial_tx: mpsc::Sender<Multiaddr
+     let bootnodes = bootnodes.to_vec();
+     tokio::spawn(async move {
+         let start = Instant::now();
++        // Without the `dnsaddr` feature `run` has refused DNS bootnodes:
++        // every entry is already a dialable IP multiaddr.
++        #[cfg(feature = "dnsaddr")]
+         let resolved = dnsaddr::resolve_all(bootnodes.iter().cloned()).await;
++        #[cfg(not(feature = "dnsaddr"))]
++        let resolved = bootnodes;
+         let total = resolved.len();
+         if total == 0 {
+             warn!(
+@@ -9737,6 +9757,21 @@ fn spawn_bootstrap_dial(bootnodes: &[Multiaddr], dial_tx: mpsc::Sender<Multiaddr
+     });
+ }
+ 
++/// The first of `addrs` that names a host by DNS rather than by IP:
++/// what a build without the `dnsaddr` feature cannot dial.
++#[cfg_attr(feature = "dnsaddr", allow(dead_code))]
++fn first_dns_multiaddr(addrs: &[Multiaddr]) -> Option<&Multiaddr> {
++    use libp2p::multiaddr::Protocol;
++    addrs.iter().find(|a| {
++        a.iter().any(|p| {
++            matches!(
++                p,
++                Protocol::Dnsaddr(_) | Protocol::Dns(_) | Protocol::Dns4(_) | Protocol::Dns6(_)
++            )
++        })
++    })
++}
++
+ /// Tag every peer known to be a bootnode before any dial goes out: the
+ /// configured bootnode multiaddrs that carry a `/p2p/` id, and the stored
+ /// peers a previous run dialed as bootnodes ([`PeerStore::bootnodes`]).
+@@ -9796,6 +9831,7 @@ fn handle_bootnode_dial(swarm: &mut Swarm<AntBehaviour>, state: &mut SwarmState,
+ /// the host's `/etc/resolv.conf` entries, so DNSADDR resolution fails on cold
+ /// start without a backup). On hosts with `/etc/resolv.conf` unreadable
+ /// (Android / minimal containers) we fall through to Cloudflare-only.
++#[cfg(feature = "dnsaddr")]
+ fn resolver_config() -> dns::ResolverConfig {
+     match hickory_resolver::system_conf::read_system_conf() {
+         Ok((cfg, _)) => {
+@@ -9853,8 +9889,11 @@ fn build_swarm(
+                     .map(|(peer, muxer), _| (peer, StreamMuxerBox::new(BoundedClose::new(muxer)))),
+             )
+         })
+-        .map_err(|e| std::io::Error::other(format!("tcp/noise/yamux: {e}")))?
+-        .with_dns_config(resolver_config(), dns::ResolverOpts::default())
++        .map_err(|e| std::io::Error::other(format!("tcp/noise/yamux: {e}")))?;
++    // `/dns*/` addresses are dialable only with the `dnsaddr` feature.
++    #[cfg(feature = "dnsaddr")]
++    let swarm = swarm.with_dns_config(resolver_config(), dns::ResolverOpts::default());
++    let swarm = swarm
+         .with_behaviour(|_| behaviour)
+         .expect("infallible behaviour")
+         .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(u64::MAX)))
+@@ -10298,6 +10337,30 @@ mod tests {
+         assert!(check_outbound_only(false, &[manual]).is_ok());
+     }
+ 
++    /// Issue #270: what a build without the `dnsaddr` feature refuses as
++    /// a bootnode (any DNS name) and what it dials (IP multiaddrs).
++    #[test]
++    fn dns_bootnodes_are_told_from_ip_ones() {
++        let parse = |s: &str| -> Multiaddr { s.parse().unwrap() };
++        let ip = [
++            parse("/ip4/192.0.2.1/tcp/1634/p2p/QmTxX73q8dDiVbmXU7GqMNwG3gWmjSFECuMoCsTW4xp6CK"),
++            parse("/ip6/2001:db8::1/tcp/1634"),
++        ];
++        assert_eq!(first_dns_multiaddr(&ip), None);
++        for dns in [
++            "/dnsaddr/mainnet.ethswarm.org",
++            "/dns/example.org/tcp/1634",
++            "/dns4/example.org/tcp/1634",
++            "/dns6/example.org/tcp/1634",
++        ] {
++            let mut addrs = ip.to_vec();
++            addrs.push(parse(dns));
++            assert_eq!(first_dns_multiaddr(&addrs), Some(&parse(dns)), "{dns}");
++        }
++        let err = RunError::DnsBootnode(parse("/dnsaddr/mainnet.ethswarm.org")).to_string();
++        assert!(err.contains("/dnsaddr/mainnet.ethswarm.org") && err.contains("dnsaddr"));
++    }
++
+     /// A peer with a duplicate connection keeps its BZZ session, routing
+     /// entry and status row when one of the two closes (liveness may close
+     /// a dead duplicate next to a live one).
+diff --git a/crates/ant-p2p/src/lib.rs b/crates/ant-p2p/src/lib.rs
+index a2f9fa8..9998849 100644
+--- a/crates/ant-p2p/src/lib.rs
++++ b/crates/ant-p2p/src/lib.rs
+@@ -1,8 +1,9 @@
+-//! libp2p host (TCP + DNS, Noise, Yamux, Identify, Ping) and Swarm `/swarm/handshake/14.0.0/handshake`.
++//! libp2p host (TCP, DNS with the `dnsaddr` feature, Noise, Yamux, Identify, Ping) and Swarm `/swarm/handshake/14.0.0/handshake`.
+ 
+ mod behaviour;
+ mod bounded_close;
+ mod dial;
++#[cfg(feature = "dnsaddr")]
+ pub mod dnsaddr;
+ mod handshake;
+ mod liveness;
+@@ -34,10 +35,13 @@ pub use pushsync_swap::{
+ };
+ pub use routing::{proximity, RoutingTable, NUM_BINS, OVERLAY_LEN};
+ 
++#[cfg(feature = "dnsaddr")]
+ use libp2p::multiaddr::Multiaddr;
+ 
+ /// Default mainnet bootnodes, matching upstream `bee` >= 2.7
+-/// (`/dnsaddr/mainnet.ethswarm.org` is the only published entry).
++/// (`/dnsaddr/mainnet.ethswarm.org` is the only published entry). Needs
++/// the `dnsaddr` feature: without it a `/dnsaddr/` bootnode is refused.
++#[cfg(feature = "dnsaddr")]
+ #[must_use]
+ pub fn default_mainnet_bootnodes() -> Vec<Multiaddr> {
+     ["/dnsaddr/mainnet.ethswarm.org"]

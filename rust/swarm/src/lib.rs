@@ -11,28 +11,57 @@
 //! The node runs on a tokio runtime of its own, so that starting it needs no ambient runtime
 //! (the engine's FFI entry points run on threads without one) and stopping it is certain:
 //! [`SwarmNode::shutdown`] (or dropping the node) shuts that runtime down, which ends every
-//! task ant spawned, its listener and its connections. It is driven through ant's command
+//! task ant spawned and its connections. It is driven through ant's command
 //! channel ([`ant_control::ControlCommand`]), the in-process interface `antd`'s own control
 //! socket uses.
 //!
-//! **Linked into the engine only behind its off-by-default `swarm` feature, for dev builds:
-//! not ready for a release build** (owner, 2026-11-20: settled before any release that turns
-//! `swarm` on), for reasons inside
-//! ant that this crate cannot switch off:
-//! - ant listens on `0.0.0.0` and runs libp2p's UPnP behaviour, which asks the local router
-//!   for a port mapping and announces the public address to peers: more than a fetch-only
-//!   reader should expose. (So the tests that start a node are `#[ignore]`d.)
-//! - ant resolves `/dnsaddr` bootnodes with hickory-resolver 0.25.2, the version with known
-//!   advisories that `myotis-net` keeps out of every build on purpose.
-//! - ant would run inside the engine under the workspace's `panic = "abort"`: a panic anywhere
-//!   in its networking code, on input from any Swarm peer, would end the host process.
+//! **Linked into the engine behind its `swarm` feature, which every shipped desktop and
+//! Android build turns on** (owner's decision, 2026-11-24; the Node.js addon is built without
+//! it). On 2026-11-20 the owner had ant's
+//! three open items settled before any release that turns `swarm` on; on 2026-11-24 the owner
+//! decided to patch the vendored copy for the first two and send the same changes upstream,
+//! and to accept the third for now:
+//! - **Fixed by a patch: outbound only** (freedom-hq/ant#269, `rust/vendor/ant-patches/0001`).
+//!   Unpatched, ant listens on `0.0.0.0` and runs libp2p's UPnP behaviour, which asks the
+//!   local router for a port mapping and announces the public address to peers. This crate
+//!   starts every node with ant's `outbound_only`: no listener, no UPnP, and no external
+//!   address of ours in identify (neither a mapped one nor one a peer observed). A peer sees
+//!   the address of the connection the node dials it from, and each BZZ handshake echoes that
+//!   address back to it as the node's underlay, signed with the node's BZZ key: the peer then
+//!   holds a signed record tying this session's overlay to the public IP and port it saw (the
+//!   key is fresh for every start, [`SwarmNode::start`]). bee keeps no address of a light
+//!   node in its address book and does not gossip light nodes to other peers
+//!   (`pkg/p2p/libp2p` and `kademlia.Announce` in ethersphere/bee). The cost: with no address in identify, bee holds each inbound
+//!   handshake for its 10 s peerstore wait, so a cold start has its first BZZ peer after
+//!   about 10 s (measured 2026-11-24: first peer 10.1 s, 8 serving peers 16 s), once per
+//!   start, as the handshakes run in parallel.
+//! - **Fixed by a patch: no DNS** (freedom-hq/ant#270, `rust/vendor/ant-patches/0002`).
+//!   Unpatched, ant resolves `/dnsaddr` bootnodes with hickory-resolver 0.25.2, the version
+//!   with known advisories that `myotis-net` keeps out of its own graph on purpose, and on
+//!   Android, which has no `/etc/resolv.conf`, through Cloudflare's resolver. The patch makes
+//!   that DNS (and libp2p's DNS transport) ant-p2p's `dnsaddr` feature, which this crate
+//!   leaves off: neither is built, the node makes no DNS query at all, and it joins Swarm
+//!   through [`MAINNET_BOOTNODES`], IP multiaddrs pinned here.
+//! - **Accepted for now: a panic aborts the host** (freedom-hq/ant#271, open; owner's
+//!   decision, 2026-11-24). ant runs inside the engine under the workspace's
+//!   `panic = "abort"`: a panic anywhere in its networking code, on input from any Swarm
+//!   peer, ends the host process.
 //!
-//! Each needs a change in ant (an option for no listener and no UPnP, DNS behind a feature or
-//! through the host's resolver, a panic contract) or an owner's decision. ant itself is
-//! vendored (`rust/vendor/ant`, its `VENDORED.md`): no build fetches it from GitHub. Being on
-//! no registry, it has no advisory coverage: a security fix in ant reaches Myotis only when
-//! the copy is moved. A daily workflow reports what upstream has beyond the copy to the
-//! owner, who decides on moving it (`VENDORED.md`, "Watching upstream").
+//! **A third patch, beyond those three items: no LAN dials** (`rust/vendor/ant-patches/0003`,
+//! freedom-hq/ant#278; from the review of VesperBats/myotis#920). Unpatched, ant's underlay filter keeps a peer's
+//! private address when it lies in one of the host's own subnets, so that a bee node on the
+//! same Wi-Fi can be reached; a hive entry is signed only by the peer it describes, so any
+//! Swarm peer could have the reader open TCP connections to hosts on the user's LAN, on a
+//! port it picks. On Swarm mainnet this crate starts the node with ant's
+//! `public_dials_only`: it dials globally routable addresses only (a `dev` network, which
+//! lives on a LAN, keeps `allow_private_dials`).
+//!
+//! ant itself is vendored (`rust/vendor/ant`, its `VENDORED.md`): no build fetches it from
+//! GitHub, and the copy is upstream's at one commit plus exactly those patches, each dropped
+//! once upstream has merged its PR. Being on no registry, ant has no advisory coverage: a
+//! security fix in ant reaches Myotis only when the copy is moved. A daily workflow reports
+//! what upstream has beyond the copy to the owner, who decides on moving it (`VENDORED.md`,
+//! "Watching upstream").
 
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -45,6 +74,38 @@ use tokio::sync::{mpsc, oneshot, watch};
 /// Swarm mainnet's network id.
 pub const MAINNET_NETWORK_ID: u64 = 1;
 
+/// Swarm mainnet's bootnodes, pinned as IP multiaddrs with their peer ids: the node resolves
+/// no names (ant's `dnsaddr` feature is off), so it makes no DNS query at run time.
+///
+/// Resolved 2026-11-24 from `/dnsaddr/mainnet.ethswarm.org`, the one bootnode entry bee and
+/// ant publish, by walking its `_dnsaddr` TXT records recursively (`dig TXT
+/// _dnsaddr.<name>`). The root answers by the asker's location (its nameservers
+/// `ns1`/`ns2.mainnet.ethswarm.org` return one of `emea`, `apac`, `amer`), so all three regions
+/// were walked: `emea` → `ams`, `hel`, `jhb`; `apac` → `sgp`, `syd`; `amer` → `hil`, `sao`,
+/// `tor`. The same answers came from both authoritative servers and from 1.1.1.1, 8.8.8.8 and
+/// 9.9.9.9. Kept: every `/ip4/…/tcp/1634/p2p/…` leaf, once (`sao` lists `tor`'s), in that
+/// order. Left out: the `/tcp/1635/tls/sni/…/ws` leaves (ant dials TCP only), among them the
+/// only address of `5.78.94.214` (`hil`). Each answered on TCP 1634 that day, and a node
+/// started from them alone, outbound only, had its first BZZ peer after 10.1 s, its first
+/// serving peer after 15.2 s and 15 serving peers (24 connections) after 20 s
+/// (`mainnet_through_the_pinned_bootnodes`, 2026-11-24; an earlier run that day: 8 serving
+/// after 16 s). The reader keeps no peer store
+/// ([`SwarmConfig::mainnet`]'s `peerstore_path` is `None`), so every start joins through this
+/// list; one live entry is enough, as peers then come through hive gossip. Refreshed in a
+/// release PR, like Ethereum's bootnodes (`.claude/agent/releases.md`), with
+/// `mainnet_through_the_pinned_bootnodes` (a test, `--ignored`) as the check, which the
+/// `cold-start regression` workflow also runs (its `full`, `pins-only` and `swarm-pins`
+/// scopes), so a dead pin set can be found between releases.
+pub const MAINNET_BOOTNODES: [&str; 7] = [
+    "/ip4/159.223.6.181/tcp/1634/p2p/QmP9b7MxjyEfrJrch5jUThmuFaGzvUPpWEJewCpx5Ln6i8", // ams
+    "/ip4/135.181.84.53/tcp/1634/p2p/QmTxX73q8dDiVbmXU7GqMNwG3gWmjSFECuMoCsTW4xp6CK", // hel
+    "/ip4/139.84.229.70/tcp/1634/p2p/QmRa6rSrUWJ7s68MNmV94bo2KAa9pYcp6YbFLMHZ3r7n2M", // jhb
+    "/ip4/172.104.43.205/tcp/1634/p2p/QmeovveLJmgyfjiA9mJnvFTawHyisuJMCYicJffdWdxNmr", // sgp
+    "/ip4/170.64.184.25/tcp/1634/p2p/Qmeh2e7U2FWrSooyrjWjnNKGceJWbRxLLx8Ppy5CimzsGH", // syd
+    "/ip4/216.238.102.247/tcp/1634/p2p/QmQYFDafiKuWUDknur8VcTUVgJgNxJevLxzYRKDKKvvv1r", // hil
+    "/ip4/172.105.9.172/tcp/1634/p2p/QmQq7zXgZ2Up5NF1tsCP2odgxzU4N3Evx2trkmFYnHm27w", // tor, sao
+];
+
 /// Peers a reader keeps by default. A reader needs few; ant's own default (100) suits a node
 /// that serves.
 pub const READER_PEERS: usize = 24;
@@ -55,6 +116,18 @@ pub const NOT_READY_TEXT: &str = "the Swarm node has no usable peers yet";
 
 /// A bootnode's address, as [`SwarmConfig::bootnodes`] takes it.
 pub use libp2p::Multiaddr;
+
+/// Whether `addr` names a host by DNS (`/dnsaddr/`, `/dns/`, `/dns4/`, `/dns6/`): such an
+/// address cannot be a bootnode here, since the node resolves no names.
+pub fn needs_dns(addr: &Multiaddr) -> bool {
+    use libp2p::multiaddr::Protocol;
+    addr.iter().any(|p| {
+        matches!(
+            p,
+            Protocol::Dnsaddr(_) | Protocol::Dns(_) | Protocol::Dns4(_) | Protocol::Dns6(_)
+        )
+    })
+}
 
 /// Errors of the reader.
 #[derive(Debug)]
@@ -89,6 +162,10 @@ pub struct SwarmConfig {
     pub bootnodes: Vec<Multiaddr>,
     /// Dial peers' private and loopback addresses: a local dev network only.
     pub allow_private_dials: bool,
+    /// Dial globally routable addresses only, never a private one, not even on the host's own
+    /// LAN (ant's `public_dials_only`, `rust/vendor/ant-patches/0003`): a peer's hive gossip
+    /// cannot steer the reader to hosts on the user's network. Swarm mainnet only.
+    pub public_dials_only: bool,
     /// File for the warm-restart peer snapshot (`None`: start cold every time).
     pub peerstore_path: Option<PathBuf>,
     /// Peers the node keeps connected.
@@ -98,12 +175,25 @@ pub struct SwarmConfig {
 }
 
 impl SwarmConfig {
-    /// Swarm mainnet through its published bootnodes.
+    /// Swarm mainnet through its pinned bootnodes ([`MAINNET_BOOTNODES`]). An entry that does
+    /// not parse as a multiaddr is left out with a warning, never a panic: this runs on the
+    /// engine's FFI paths, under `panic = "abort"`. A test checks that every entry parses, so
+    /// a release leaves none out.
     pub fn mainnet() -> Self {
         Self {
             network_id: MAINNET_NETWORK_ID,
-            bootnodes: ant_p2p::default_mainnet_bootnodes(),
+            bootnodes: MAINNET_BOOTNODES
+                .iter()
+                .filter_map(|a| match a.parse() {
+                    Ok(addr) => Some(addr),
+                    Err(e) => {
+                        tracing::warn!(target: "myotis_swarm", "pinned bootnode {a} left out: {e}");
+                        None
+                    }
+                })
+                .collect(),
             allow_private_dials: false,
+            public_dials_only: true,
             peerstore_path: None,
             target_peers: READER_PEERS,
             chunk_timeout: Duration::from_secs(60),
@@ -116,6 +206,7 @@ impl SwarmConfig {
             network_id,
             bootnodes,
             allow_private_dials: true,
+            public_dials_only: false,
             peerstore_path: None,
             target_peers: READER_PEERS,
             chunk_timeout: Duration::from_secs(30),
@@ -133,10 +224,18 @@ pub struct SwarmNode {
 
 impl SwarmNode {
     /// Starts a node on a runtime of its own (two worker threads). Callable from any thread,
-    /// with or without a runtime. Its identity (the BZZ signing key, the overlay nonce and the
-    /// libp2p key, unrelated to each other) is fresh for every start: a reader needs no stable
-    /// identity, and a fresh one links fewer sessions together.
+    /// with or without a runtime. The node is outbound only: it listens nowhere, maps no port
+    /// over UPnP and puts no external address in identify (each BZZ handshake still echoes,
+    /// signed, the address the peer saw it dial from). A bootnode named by DNS ([`needs_dns`])
+    /// is refused: this build resolves no names. Its identity (the BZZ signing key, the
+    /// overlay nonce and the libp2p key, unrelated to each other) is fresh for every start: a
+    /// reader needs no stable identity, and a fresh one links fewer sessions together.
     pub fn start(cfg: SwarmConfig) -> Result<Self, SwarmError> {
+        if let Some(addr) = cfg.bootnodes.iter().find(|a| needs_dns(a)) {
+            return Err(SwarmError::Failed(format!(
+                "bootnode {addr} needs DNS, which this Swarm reader does not do: give /ip4/ or /ip6/ multiaddrs"
+            )));
+        }
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
             .thread_name("myotis-swarm")
@@ -154,6 +253,9 @@ impl SwarmNode {
         )
         .with_network_id(cfg.network_id)
         .with_allow_private_dials(cfg.allow_private_dials)
+        .with_public_dials_only(cfg.public_dials_only)
+        // A reader: no listener, no UPnP mapping, no address of ours announced (ant#269).
+        .with_outbound_only(true)
         .with_status(status_tx)
         .with_commands(rx)
         .with_peerstore_path(cfg.peerstore_path)
@@ -340,13 +442,38 @@ mod tests {
         ));
     }
 
+    /// The pinned bootnodes are what ant can dial without DNS: TCP over IPv4, each with its
+    /// peer id, no name anywhere, no duplicate. And every one parses: [`SwarmConfig::mainnet`]
+    /// leaves out an entry that does not, so this is what keeps the list complete.
+    #[test]
+    fn mainnet_bootnodes_are_ip_multiaddrs_with_peer_ids() {
+        use libp2p::multiaddr::Protocol;
+        for a in MAINNET_BOOTNODES {
+            assert!(a.parse::<Multiaddr>().is_ok(), "{a} is not a multiaddr");
+        }
+        let cfg = SwarmConfig::mainnet();
+        assert_eq!(cfg.bootnodes.len(), MAINNET_BOOTNODES.len());
+        // No private address is dialed on mainnet, not even on the host's own LAN (patch 0003).
+        assert!(cfg.public_dials_only && !cfg.allow_private_dials);
+        let mut peers = std::collections::HashSet::new();
+        for addr in &cfg.bootnodes {
+            let parts: Vec<Protocol> = addr.iter().collect();
+            assert!(
+                matches!(
+                    parts.as_slice(),
+                    [Protocol::Ip4(ip), Protocol::Tcp(1634), Protocol::P2p(peer)]
+                        if !ip.is_private() && !ip.is_loopback() && peers.insert(*peer)
+                ),
+                "{addr}"
+            );
+        }
+    }
+
     /// A node with nowhere to connect starts from a thread without a runtime, says it has no
     /// peers instead of hanging, and is gone after `shutdown`: its status sender (owned by
-    /// ant's node loop) is dropped. Not run by default: ant listens on 0.0.0.0 and asks the
-    /// router for a UPnP mapping (`cargo test --manifest-path rust/swarm/Cargo.toml --
-    /// --ignored`).
+    /// ant's node loop) is dropped. It opened no listener and announced no address (ant's
+    /// `outbound_only`), which is also why this test can run by default.
     #[test]
-    #[ignore]
     fn a_node_without_peers_starts_answers_and_stops() {
         let mut cfg = SwarmConfig::dev(4020, Vec::new());
         cfg.chunk_timeout = Duration::from_secs(10);
@@ -360,6 +487,13 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(500)).await;
             assert!(node.is_running(), "the node did not come up");
             assert_eq!(node.connected_peers(), 0);
+            let st = node.status.borrow().clone();
+            assert!(st.listeners.is_empty(), "listening on {:?}", st.listeners);
+            assert!(
+                st.external_addresses.is_empty(),
+                "announcing {:?}",
+                st.external_addresses
+            );
             let got = node.chunk([7u8; 32], false).await;
             assert!(
                 matches!(got, Err(SwarmError::NotReady(_)) | Ok(None)),
@@ -374,6 +508,81 @@ mod tests {
             .await;
             assert!(gone.is_ok(), "the node's status sender outlived shutdown");
         });
+    }
+
+    /// A DNS bootnode is refused before anything starts, and told from an IP one.
+    #[test]
+    fn a_dns_bootnode_is_refused() {
+        for dns in [
+            "/dnsaddr/mainnet.ethswarm.org",
+            "/dns4/example.org/tcp/1634",
+        ] {
+            let addr: Multiaddr = dns.parse().unwrap();
+            assert!(needs_dns(&addr));
+            let got = SwarmNode::start(SwarmConfig::dev(4020, vec![addr]));
+            assert!(
+                matches!(&got, Err(SwarmError::Failed(m)) if m.contains("needs DNS")),
+                "{dns}"
+            );
+        }
+        assert!(!needs_dns(&MAINNET_BOOTNODES[0].parse().unwrap()));
+    }
+
+    /// Swarm mainnet through the pinned bootnodes alone (not run by default: it needs the
+    /// network). The node completes BZZ handshakes with peers that can serve retrievals, a read
+    /// is answered (a random address: not delivered), and it never listens or puts an external
+    /// address in identify. Prints how long the handshakes took (bee waits up to 10 s for a
+    /// peer's identify addresses, which an outbound-only node has none of). Run it when the
+    /// pins move: `cargo test --manifest-path rust/swarm/Cargo.toml -- --ignored --nocapture
+    /// mainnet`; the `cold-start regression` workflow runs it too (scope `swarm-pins`).
+    #[test]
+    #[ignore]
+    fn mainnet_through_the_pinned_bootnodes() {
+        let node = SwarmNode::start(SwarmConfig::mainnet()).unwrap();
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            let t = Instant::now();
+            let (mut first_bzz, mut first_serving) = (None, None);
+            loop {
+                let st = node.status.borrow().clone();
+                assert!(st.listeners.is_empty(), "listening on {:?}", st.listeners);
+                assert!(st.external_addresses.is_empty(), "announcing {:?}", st.external_addresses);
+                let routing = &st.peers.routing;
+                if first_bzz.is_none() && routing.size > 0 {
+                    first_bzz = Some(t.elapsed());
+                }
+                if first_serving.is_none() && routing.serving > 0 {
+                    first_serving = Some(t.elapsed());
+                }
+                if routing.serving >= 8 || t.elapsed() > Duration::from_secs(90) {
+                    println!(
+                        "first BZZ handshake after {first_bzz:?}, first serving peer after \
+                         {first_serving:?}; {} serving, {} in the routing table, {} connections \
+                         after {:?}",
+                        routing.serving,
+                        routing.size,
+                        st.peers.connected,
+                        t.elapsed()
+                    );
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            assert!(first_serving.is_some(), "no serving peer through the pinned bootnodes");
+            let t = Instant::now();
+            let got = node.chunk([0x5a; 32], true).await;
+            println!("random chunk: {got:?} after {:?}", t.elapsed());
+            // Not delivered, as ant reports it: "not found", or every asked peer failed.
+            assert!(
+                matches!(&got, Ok(None))
+                    || matches!(&got, Err(SwarmError::Failed(m)) if m.contains("all peers failed")),
+                "{got:?}"
+            );
+        });
+        node.shutdown(Duration::from_secs(5));
     }
 
     /// Against a running bee-factory (not run by default):

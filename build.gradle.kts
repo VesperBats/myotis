@@ -732,7 +732,8 @@ configure(subprojects.filter { it.name in publishedArtifactIds }) {
 // With cargo installed, Gradle builds both engines:
 //   cargoBuildHost  → rust/target/release/*.{so,dylib,dll}; wired into
 //                     :app run (java.library.path) and :consensus test
-//   cargoTest       → cargo test --workspace; wired into root `check`
+//   cargoTest       → cargo test --workspace (with the Swarm reader, as
+//                     cargoBuildHost); wired into root `check`
 //   cargoNdkAndroid → Android jniLibs (engine + native BLS) via
 //                     rust/build-android.sh; built from source (no committed
 //                     .so) and wired into :myotis-engine androidPreBuild. Required by
@@ -1045,18 +1046,24 @@ val torEngine = project.hasProperty("torEngine") &&
 // has to load the engine library just to learn it cannot route over Tor.
 extra["torEngine"] = torEngine
 
-// Opt-in Swarm reader in the engine (#899; .claude/agent/data-sources.md, the carve-out
-// for Swarm reads of the address index): builds myotis-engine with `--features swarm`,
-// linking the embedded ant node into the HOST library (cargoBuildHost) for the daemon
-// and the desktop app, so they can serve the address history. Dev builds only, OFF by
-// default and in every shipped artifact (owner, 2026-11-20: who watches ant for security
-// fixes is settled before a release turns it on). Settled (owner's decision, 2026-11-24):
-// .github/workflows/ant-upstream-watch.yml compares upstream ant with the vendored commit
-// daily and reports what is new in one `ant-upstream` issue; the owner, acting on it,
-// decides on re-vendoring and a release. Turning the reader on in a release is a change
-// of its own. Android and iOS refuse the history in this version, so cargoNdkAndroid does
-// not take it. Spelled like -PtorEngine.
-val swarmEngine = project.hasProperty("swarmEngine") &&
+// The Swarm reader in the engine (#899; .claude/agent/data-sources.md, the carve-out for
+// Swarm reads of the address index): builds myotis-engine with `--features swarm`, linking
+// the embedded ant node into the HOST library (cargoBuildHost: the daemon, the desktop
+// apps and the engine library's desktop natives) and the Android jniLibs (cargoNdkAndroid,
+// via build-android.sh's MYOTIS_SWARM_ENGINE: the engine library's AAR and the Android app),
+// so they can serve the address history. ON by default, so every artifact built through these
+// two tasks carries it and a rebuild from the documented commands gives the same bytes (the
+// Node.js addon is the exception: node-binding.yml and scripts/repro/build_linux.sh build it
+// with a plain `cargo build -p myotis-node`, without the reader; it has no history call)
+// (owner's decision, 2026-11-24: the release ships ant and the history works on Android; who
+// watches ant upstream: rust/vendor/ant/VENDORED.md, "Watching upstream"). cargoTest tests the
+// workspace with the reader too, so the suites run against the libp2p build that ships (ant's
+// libp2p features unify with myotis-net's). iOS still refuses the history and
+// its static archive never takes the feature. Opt out with -PswarmEngine=false (an ant-free
+// engine that refuses the history, -32602). A bare -PswarmEngine, or true/1/yes/on, is the
+// default; false/0/no/off opt out; anything else fails the build rather than quietly
+// producing an engine without the reader.
+val swarmEngine = !project.hasProperty("swarmEngine") ||
     (project.property("swarmEngine") as? String).let {
         when (it?.trim()?.lowercase()) {
             null, "", "true", "1", "yes", "on" -> true
@@ -1533,11 +1540,19 @@ tasks.register<Exec>("uniffiGenerateKotlin") {
 
 val cargoTest = tasks.register<Exec>("cargoTest") {
     group = "rust"
-    description = "cargo test --workspace (self-skips when cargo is missing)"
+    description = "cargo test --workspace, with the Swarm reader unless -PswarmEngine=false (self-skips when cargo is missing)"
     onlyIf { rustAvailable }
     workingDir = file("rust")
     rustToolchainPath?.let { environment("PATH", it) }
-    commandLine(rustTool("cargo"), "test", "--locked", "--workspace")
+    // The Swarm reader as cargoBuildHost builds it (-PswarmEngine, on by default), so the
+    // workspace is tested with the feature set, and the unified libp2p, that ships.
+    commandLine(
+        buildList {
+            addAll(listOf(rustTool("cargo"), "test", "--locked", "--workspace"))
+            if (swarmEngine) addAll(listOf("--features", "myotis-engine/swarm"))
+        }
+    )
+    inputs.property("swarmEngine", swarmEngine)
     // No declared outputs: cargo's own incrementalism makes a no-change rerun
     // cheap, and test verdicts aren't files Gradle could fingerprint.
 }
@@ -1700,6 +1715,8 @@ tasks.register<Exec>("cargoNdkAndroid") {
     // the variable; docs/how-it-works/privacy-and-tor.md). Set either way, so a value
     // inherited from the developer's shell cannot flip the build behind the flag.
     environment("MYOTIS_TOR_ENGINE", if (torEngine) "1" else "0")
+    // The Swarm reader (-PswarmEngine, on by default; above), the same way.
+    environment("MYOTIS_SWARM_ENGINE", if (swarmEngine) "1" else "0")
     // Windows can't exec a .sh directly (CreateProcess error=193); route it
     // through bash there (Git for Windows ships one alongside git itself).
     if (isWindowsHost) {
@@ -1714,8 +1731,9 @@ tasks.register<Exec>("cargoNdkAndroid") {
     inputs.property("cargoVersion", cargoVersion)
     inputs.property("cargoNdkVersion", cargoNdkVersion)
     inputs.property("ndkDir", androidNdkDir?.absolutePath ?: "")
-    // The Tor feature flips the libs' contents, so it must key UP-TO-DATE too.
+    // The Tor and Swarm features flip the libs' contents, so they key UP-TO-DATE too.
     inputs.property("torEngine", torEngine)
+    inputs.property("swarmEngine", swarmEngine)
     outputs.files(
         file("myotis-engine/src/androidMain/jniLibs/arm64-v8a/libmyotis_bls.so"),
         file("myotis-engine/src/androidMain/jniLibs/x86_64/libmyotis_bls.so"),

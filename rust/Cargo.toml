@@ -59,14 +59,15 @@ members = ["myotis-addr1", "myotis-bls", "myotis-consensus", "myotis-core", "myo
 # `panic = "unwind"`. It also pulls an HTTP stack no engine target links.
 #
 # swarm (crate myotis-swarm, the embedded ant Swarm node) is excluded too: a member is
-# built by every `cargo build --workspace`, the release build included, and would pull
-# ant's libp2p features (dns, ping, upnp) into the engine. myotis-engine links it only
-# behind its off-by-default `swarm` feature (dev builds; rust/swarm/src/lib.rs, "Not ready
-# for a release build"), so this lock records its graph and no shipped build compiles it.
+# built by every `cargo build --workspace` and would pull ant's libp2p features (ping,
+# upnp) into every build of the engine. myotis-engine links it only behind its `swarm`
+# feature, off for a plain cargo build and on in every shipped desktop and Android build
+# (owner's decision, 2026-11-24; rust/swarm/src/lib.rs); this lock records its graph.
 # Its own lock, rust/swarm/Cargo.lock, is for building it on its own (tests, the example).
 #
-# vendor holds third-party sources copied in verbatim, today ant (vendor/ant/VENDORED.md):
-# not on crates.io, and as a git dependency it would make every cold build fetch it.
+# vendor holds third-party sources copied in, today ant (vendor/ant/VENDORED.md): upstream's
+# files at one commit plus a patch series (vendor/ant-patches), not on crates.io, and as a
+# git dependency it would make every cold build fetch it.
 # Upstream's code with its own workspace manifest (vendor/ant/Cargo.toml), built only as a
 # path dependency, never as a member: no Myotis fmt or clippy runs over it.
 exclude = ["tor-poc", "roost", "swarm", "vendor"]

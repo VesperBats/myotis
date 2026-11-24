@@ -315,6 +315,33 @@ class MadeUp(unittest.TestCase):
         self.assertIn(("myotis:pinned-by", "rust/Cargo.lock"), self.properties(refs[ref]))
         self.assertNotIn("hashes", refs[ref])
 
+    def test_a_vendored_trees_patches_are_named_on_its_crates(self):
+        commit = "b138f6bc074d8c28149017d4e7b1e80db8c67d4d"
+        self.tree.write("rust/vendor/up/VENDORED.md",
+                        f"# up\n\nUpstream: https://example.org/up\nCommit: {commit}\n")
+        self.tree.write("rust/vendor/up/crates/up-core/Cargo.toml", '[package]\nname = "up-core"\nversion = "0.2.0"\n')
+        self.tree.write("rust/vendor/up-patches/0002-b.patch", "")
+        self.tree.write("rust/vendor/up-patches/0001-a.patch", "")
+        self.tree.write("rust/Cargo.lock", Tree.CARGO.replace(
+            'dependencies = ["helper", "dup 1.0.0", "from-git"]',
+            'dependencies = ["helper", "dup 1.0.0", "from-git", "up-core"]')
+            + '\n[[package]]\nname = "up-core"\nversion = "0.2.0"\n')
+        refs = self.components("native")
+        source = f"git+https://example.org/up?rev={commit}#{commit}"
+        ref = "pkg:cargo/up-core@0.2.0?vcs_url=" + sbom.quote(source)
+        patched = [v for n, v in self.properties(refs[ref]) if n == "myotis:patched-by"]
+        self.assertEqual(patched, ["rust/vendor/up-patches/0001-a.patch", "rust/vendor/up-patches/0002-b.patch"])
+        self.assertIn(("myotis:pinned-by", "rust/Cargo.lock"), self.properties(refs[ref]))
+
+    def test_a_patch_series_without_its_tree_or_with_other_files_is_an_error(self):
+        self.tree.write("rust/vendor/gone-patches/0001-a.patch", "")
+        with self.assertRaisesRegex(sbom.SbomError, "a patch series without its vendored tree"):
+            self.build("native")
+        self.tree.write("rust/vendor/gone/VENDORED.md", "Upstream: https://example.org/g\nCommit: " + "a" * 40 + "\n")
+        self.tree.write("rust/vendor/gone-patches/wip.patch", "")
+        with self.assertRaisesRegex(sbom.SbomError, "wip.patch, not only"):
+            self.build("native")
+
     def test_a_vendored_tree_without_its_notes_is_an_error(self):
         self.tree.write("rust/vendor/up/crates/up-core/Cargo.toml", '[package]\nname = "up-core"\nversion = "0.2.0"\n')
         with self.assertRaisesRegex(sbom.SbomError, "without VENDORED.md"):

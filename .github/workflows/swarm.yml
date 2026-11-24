@@ -3,10 +3,13 @@
 #
 # Its own workflow for the same reason as roost.yml: it is deliberately NOT a
 # workspace member (rust/Cargo.toml `exclude`), so `cargo test --workspace` and
-# rust-clippy.yml do not see it. myotis-engine links it behind its off-by-default
-# `swarm` feature, which no other lane enables: this lane also builds and tests the
-# engine with that feature (addrhist, the Swarm reader's only caller) and lints it at
-# rust-clippy.yml's level, and runs on changes to the crates that feature builds.
+# rust-clippy.yml do not see it. myotis-engine links it behind its `swarm` feature,
+# which a plain cargo build leaves off and Gradle turns on by default (-PswarmEngine:
+# cargoBuildHost, cargoNdkAndroid and cargoTest, so ci.yml's `check` tests the workspace
+# with it). This lane builds and tests the engine with that feature (addrhist, the
+# Swarm reader's only caller) and lints it at rust-clippy.yml's level, checks that the
+# feature brings no DNS resolver into the engine's graph, and runs on changes to the
+# crates that feature builds.
 #
 # ant is vendored in rust/vendor/ant (its VENDORED.md): this lane builds it as a
 # path dependency, and never fetches it. Cargo decides whether a path crate is
@@ -81,3 +84,34 @@ jobs:
         run: cargo test --locked --manifest-path rust/Cargo.toml -p myotis-engine --features swarm --lib addrhist
       - name: Engine with `swarm` (clippy, rust-clippy.yml's level)
         run: cargo clippy --locked --manifest-path rust/Cargo.toml -p myotis-engine --features swarm --all-targets --keep-going -- -D clippy::incompatible_msrv
+      # "No DNS" (.claude/agent/data-sources.md): the reader makes no DNS query because
+      # ant-p2p's `dnsaddr` feature (rust/vendor/ant-patches/0002) stays off, so neither
+      # hickory-resolver 0.25 (for /dnsaddr bootnodes) nor libp2p's DNS transport is built.
+      # Only bootnodes are vetted at run time: a /dns4/ underlay from hive gossip is
+      # undialable only because the transport is not compiled in. A dependency on ant-node
+      # or ant-p2p with default features, anywhere in the graph, would bring both back with
+      # every other check green. So, for every version rust/Cargo.lock holds of the three
+      # crates: libp2p-dns and hickory 0.25 must have no path from the engine at all, and
+      # no hickory may have one through ant (hickory 0.26 is myotis-net's, for EIP-1459 DNS
+      # discovery, outside the reader). `cargo tree -i` prints nothing (exit 0) when no path
+      # leads to the crate; any failure of it fails the step.
+      - name: Engine with `swarm` (no DNS resolver in the reader)
+        run: |
+          set -euo pipefail
+          specs=$(awk '/^name = /{n=$3} /^version = /{v=$3; gsub(/"/,"",n); gsub(/"/,"",v);
+                   if (n=="hickory-resolver"||n=="hickory-proto"||n=="libp2p-dns") print n"@"v}' rust/Cargo.lock)
+          [ -n "$specs" ] || { echo "::error::no hickory or libp2p-dns in rust/Cargo.lock: check this step"; exit 1; }
+          for spec in $specs; do
+            found=$(cargo tree --locked --manifest-path rust/Cargo.toml -p myotis-engine --features swarm \
+              -e normal,build --target all --prefix none -i "$spec")
+            case "$spec" in
+              libp2p-dns@*|hickory-*@0.25.*) bad=$found ;;
+              *) bad=$(printf '%s\n' "$found" | grep -E '^(ant-[a-z-]+|myotis-swarm) v' || true) ;;
+            esac
+            if [ -n "$bad" ]; then
+              echo "::error::$spec is in myotis-engine's graph with \`swarm\` (ant's \`dnsaddr\` feature back on?):"
+              printf '%s\n' "$found"
+              exit 1
+            fi
+            echo "$spec: no path through the Swarm reader"
+          done

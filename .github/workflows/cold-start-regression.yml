@@ -65,6 +65,19 @@
 # platform (/etc/resolv.conf on Linux, SCDynamicStore on macOS since 0.26,
 # #806). It runs in the `full` scope on those two networks, and on its own as
 # the `dns-tree` scope: dispatch that after a resolver bump.
+#
+# The `swarm-pins` job asks the pins-alive question of the Swarm reader (the
+# embedded ant node behind the address history; rust/swarm): does a node
+# started from MAINNET_BOOTNODES alone, outbound only and with no DNS, reach
+# peers that serve retrievals? It resolves no names and keeps no peer store, so
+# those seven third-party addresses are its only way into Swarm: with all of
+# them gone, every history read answers the retryable "no usable peers yet" for
+# good. `mainnet_through_the_pinned_bootnodes` (an #[ignore]d test of
+# rust/swarm), which also prints how long the handshakes took. Swarm mainnet
+# serves every chain, so the job runs whatever the network input, in the
+# `full` and `pins-only` scopes and on its own as the `swarm-pins` scope:
+# dispatch that between releases to learn whether a refresh of the pins
+# (.claude/agent/releases.md) can wait for the next one.
 name: cold-start regression
 
 on:
@@ -79,9 +92,9 @@ on:
         options: [gnosis, mainnet, sepolia, chiado]
         default: gnosis
       scope:
-        description: "full = all three checks, plus the DNS tree walk on mainnet/sepolia (release). pins-only = skip the deep walk. census = only the DHT period census (no checks). dns-tree = only the DNS tree walk, Linux + macOS (mainnet/sepolia)."
+        description: "full = all three checks, plus the DNS tree walk on mainnet/sepolia and the Swarm pins (release). pins-only = skip the deep walk (the Swarm pins too). census = only the DHT period census (no checks). dns-tree = only the DNS tree walk, Linux + macOS (mainnet/sepolia). swarm-pins = only the Swarm reader's pinned bootnodes."
         type: choice
-        options: [full, pins-only, census, dns-tree]
+        options: [full, pins-only, census, dns-tree, swarm-pins]
         default: full
       anchor_root:
         description: "Optional override: old anchor block root (64 hex). Default: this network's entry in rust/testdata/anchors/oldest-servable.properties."
@@ -104,7 +117,7 @@ on:
 # gnosis then mainnet must not silently kill the first run. A census and a
 # DNS tree walk get their own groups, so neither cancels a release check.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.network }}${{ (inputs.scope == 'census' || inputs.scope == 'dns-tree') && format('-{0}', inputs.scope) || '' }}
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.network }}${{ (inputs.scope == 'census' || inputs.scope == 'dns-tree' || inputs.scope == 'swarm-pins') && format('-{0}', inputs.scope) || '' }}
   cancel-in-progress: true
 
 permissions:
@@ -113,7 +126,7 @@ permissions:
 jobs:
   cold-start:
     name: ${{ inputs.scope == 'census' && 'period census' || 'cold start' }} (${{ inputs.network }}, ${{ inputs.scope }})
-    if: inputs.scope != 'dns-tree'
+    if: inputs.scope != 'dns-tree' && inputs.scope != 'swarm-pins'
     runs-on: ubuntu-26.04
     # Both budgets plus the build, with headroom: the old-anchor test alone
     # allows 30 minutes of walking.
@@ -250,3 +263,37 @@ jobs:
         env:
           NET: ${{ inputs.network }}
         run: cargo test --locked --release -p myotis-net --test live_dns_tree -- --ignored --nocapture
+
+  # See the header: the Swarm reader's pinned bootnodes, alone. rust/swarm is
+  # not a workspace member (rust/Cargo.toml `exclude`): it builds against its
+  # own lock, and ant (vendored, rust/vendor/ant) is built again on every run
+  # (swarm.yml says why). The test prints the first BZZ handshake, the first
+  # serving peer and the counts; it fails on no serving peer within 90 s, a
+  # listener or an announced address, or a random read not reported as
+  # undelivered.
+  swarm-pins:
+    name: Swarm reader pins (${{ inputs.scope }})
+    if: inputs.scope == 'full' || inputs.scope == 'pins-only' || inputs.scope == 'swarm-pins'
+    runs-on: ubuntu-26.04
+    # The test gives up after 90 s; the rest is building ant and libp2p cold.
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Set up Rust
+        uses: ./.github/actions/rust-toolchain
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0  # v2.9.3
+        with:
+          workspaces: rust/swarm
+
+      - name: Build the test
+        run: cargo test --locked --manifest-path rust/swarm/Cargo.toml --no-run
+
+      - name: Are the Swarm reader's pinned bootnodes alive?
+        env:
+          RUST_LOG: warn
+        run: |
+          cargo test --locked --manifest-path rust/swarm/Cargo.toml -- \
+            --ignored --nocapture --exact tests::mainnet_through_the_pinned_bootnodes

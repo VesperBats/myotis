@@ -19,6 +19,35 @@ its trust anchors and release checks.
 
 ## [Unreleased]
 
+### Changed
+
+- Address history: the Swarm reader ships in the desktop and Android builds
+  (owner's decision, 2026-11-24): the daemon, the desktop installers, the
+  engine library's desktop natives and Android AAR, and the Android app
+  (`-PswarmEngine` is on by default; `-PswarmEngine=false` opts out). iOS, the
+  Java and Go engines, and every engine while Tor routing is on still refuse
+  the history with `-32602` (#920).
+
+### Security
+
+- Swarm reader (the embedded `ant` node behind the address history): it is
+  outbound only, with no listener, no UPnP port mapping on the user's router
+  and no external address in identify, and it makes no DNS query. A peer it
+  dials still learns the public IP and port it sees the connection come from:
+  each BZZ handshake echoes that address back to the peer, signed with the
+  session's fresh key, as for any node behind NAT. It dials globally routable
+  addresses only: a private address a peer names, even one on the user's own
+  LAN, is never dialed. It joins Swarm mainnet through seven pinned IP
+  bootnodes, and hickory-resolver 0.25 and libp2p-dns are no longer built. A
+  cold start takes about 10 s longer before the first read, the time bee
+  waits for the identify addresses of a peer that advertises none. Three
+  patches to the vendored ant (`rust/vendor/ant-patches`), sent upstream as
+  freedom-hq/ant#276, #277 and #278. ant is vendored at 0.5.79 (commit
+  45732f9), with upstream's fix for a crash on a malformed underlay list
+  from a peer (freedom-hq/ant#279) and checked bounds in chunk encryption.
+  Any other panic in ant still ends the host process (freedom-hq/ant#271,
+  accepted for now) (#920).
+
 ## [0.1.22] - 2026-11-23
 
 ### Fixed

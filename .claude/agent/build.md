@@ -51,6 +51,10 @@
 ./gradlew cargoTest        # cargo test --workspace (part of `check`)
 ./gradlew cargoBuildNoStd  # no_std canary: cargo build -p myotis-core --no-default-features for x86_64-unknown-none (part of `check`; self-skips without that rustup target)
 ./gradlew cargoNdkAndroid  # Android jniLibs, built from source (needs cargo-ndk + NDK + Android rustup targets)
+# cargoBuildHost and cargoNdkAndroid link the Swarm reader (myotis-engine's
+# swarm feature, the vendored ant) by default; -PswarmEngine=false builds an
+# engine without it, which refuses the address history (-32602). iOS never
+# takes it.
 
 # Go engine (go/ — the desktop-only third engine, :myotis-engine-go). OPTIONAL
 # like the Rust block: without the go toolchain goBuildCShared self-skips. The

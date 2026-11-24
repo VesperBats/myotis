@@ -1,10 +1,11 @@
 # vendored ant — rust/vendor/ant is upstream's ant at the commit its VENDORED.md
-# records (scripts/vendor_ant.sh --check): the vendored crates, byte for byte and
-# mode for mode, and that commit on upstream's default branch.
+# records plus the patch series in rust/vendor/ant-patches (scripts/vendor_ant.sh
+# --check): the vendored crates, byte for byte and mode for mode, that commit on
+# upstream's default branch, and every patch named in VENDORED.md.
 #
-# A workflow of its own, path-filtered to the copy and the script: it is the one
+# A workflow of its own, path-filtered to the copy, its patches and the script: it is the one
 # check in CI that needs github.com/freedom-hq/ant to be reachable, so a PR that
-# changes neither does not depend on that. The builds never fetch ant
+# changes none of them does not depend on that. The builds never fetch ant
 # (swarm.yml builds the copy by path).
 name: vendored ant
 
@@ -13,11 +14,13 @@ on:
     branches: ["main"]
     paths:
       - "rust/vendor/ant/**"
+      - "rust/vendor/ant-patches/**"
       - "scripts/vendor_ant.sh"
       - ".github/workflows/vendored-ant.yml"
   pull_request:
     paths:
       - "rust/vendor/ant/**"
+      - "rust/vendor/ant-patches/**"
       - "scripts/vendor_ant.sh"
       - ".github/workflows/vendored-ant.yml"
 

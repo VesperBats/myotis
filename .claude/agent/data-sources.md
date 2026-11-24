@@ -165,9 +165,29 @@
     Bee/ant HTTP API (that stays the debug-only "local client over HTTP" of the
     rule above, usable for debugging as before), and never a Swarm HTTP gateway
     (one operator's server, which sees every request with the user's IP).
+    Shipped in the desktop and Android builds (owner's decision, 2026-11-24).
+    - **Outbound only**: no listener, no UPnP port mapping, no address of its
+      own advertised to peers.
+    - **No DNS**: no DNS query at run time. It joins Swarm through bootnodes
+      pinned as IP multiaddrs in the release (`MAINNET_BOOTNODES`,
+      `rust/swarm`), refreshed in a release PR. A bootnode named by DNS is
+      refused.
+    - **Vendored with a patch series**: ant is upstream's commit
+      (`rust/vendor/ant`) plus the patches in `rust/vendor/ant-patches`
+      (owner's decision, 2026-11-24). Each patch is sent upstream as a PR and
+      dropped once upstream has merged it.
+    - **A panic in ant ends the host process**: on input from any Swarm peer,
+      under `panic = "abort"`. Accepted for now (freedom-hq/ant#271, open;
+      owner's decision, 2026-11-24).
+  - **Who watches ant (owner's decision, 2026-11-24).** ant is on no registry, so
+    no advisory database names it. `.github/workflows/ant-upstream-watch.yml`
+    compares upstream ant daily with the commit `rust/vendor/ant/VENDORED.md`
+    records and reports what is beyond it (commits, tags and releases, published
+    security advisories) in one issue labelled `ant-upstream`, assigned to the
+    owner. The owner, acting on it, decides on re-vendoring and on a release; the
+    workflow never re-vendors and never closes the issue.
   - **Only where the reader runs.** Any engine or build without it (the Java
-    and Go engines; a Rust engine built without `ant`, Android and iOS in the
-    first version), the Rust engine without a configured importer key, and
+    and Go engines; a Rust engine built without `ant`; iOS), the Rust engine without a configured importer key, and
     the Rust engine while Tor routing is on (the embedded node does not route
     through Tor, so its requests would carry the user's IP past the Tor
     setting) refuse the address history with the permanent `-32602`: never an

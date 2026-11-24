@@ -2,8 +2,11 @@
 
 Myotis can list the blocks and transactions an address appears in, newest first, from an
 **addr1 address index** published on Swarm, and check each entry against verified chain data.
-It is a development feature: the Swarm reader (the embedded `ant` light node) is linked only
-into builds that ask for it, and every shipped artifact refuses the history.
+The Swarm reader (the embedded `ant` light node) is linked into every shipped desktop and
+Android build: the daemon, the desktop apps, the engine library's desktop natives and its
+Android AAR, and the Android app (owner's decision, 2026-11-24). iOS, and the Java and Go
+engines, refuse the history. The Node.js addon (`myotis-node`) is built without the reader;
+it has no history call.
 
 The rule this rests on is the carve-out for Swarm reads of the address index in
 `.claude/agent/data-sources.md`. The plan is `docs/ideas/address-history-plan.md` (#899).
@@ -29,19 +32,42 @@ The rule this rests on is the carve-out for Swarm reads of the address index in
 
 ## Building with the reader
 
+Gradle links the reader by default: `cargoBuildHost` (the host library of the daemon, the
+desktop app and the engine library's natives) and `cargoNdkAndroid` (the Android jniLibs of
+the AAR and the app) build `myotis-engine` with `--features swarm`, and `cargoTest` tests the
+workspace with the same features. `-PswarmEngine=false` builds and tests an engine without
+it. A plain `cargo build` does not turn it on, and the Node.js addon, built by a plain `cargo
+build -p myotis-node` (`node-binding.yml`, `scripts/repro/build_linux.sh`), is built without
+it.
+
 ```bash
-# The JVM daemon: link ant into the host library (the desktop app gets it too, but has no
-# way to take the settings yet).
-./gradlew :app:run -PswarmEngine -Pengine=rust -PaddressHistoryConfig=<settings file>
+# The JVM daemon (the desktop app has the reader too, but no way to take the settings yet).
+./gradlew :app:run -Pengine=rust -PaddressHistoryConfig=<settings file>
 
 # The Rust JSON-RPC daemon.
 cargo build --release -p myotis-rpcd --features swarm   # in rust/
 myotis-rpcd --network mainnet --address-history-config <settings file>
 ```
 
-Without the reader (no `-PswarmEngine`, no `--features swarm`, Android, iOS, the Java and Go
-engines), every call is refused with the permanent `-32602`, and so are the settings: a daemon
-told to use the history does not start without it.
+On Android, an embedder of the AAR sets the settings with
+`MyotisEngine.setAddressHistoryConfigJson` and reads through `VerifiedReads`, as on the
+desktop. The embedded node is not left running for the life of the process: it starts on the
+first history read and stops when the last running chain handle pauses (the engine's idle
+sleep) or stops, so an idle-slept engine holds no Swarm connection, ping or timer. The next
+read starts it again and pays the cold start below (about 10 s to the first peer), so a host
+that pages through a history should do so while its chain is awake.
+
+On every platform the embedded node is outbound only (no listener, no UPnP port mapping, no
+external address in identify; each BZZ handshake still echoes back, signed, the public address
+the peer saw it dial from), dials globally routable addresses only (never a private one a
+peer names, not even on the user's own LAN) and makes no DNS query: it joins Swarm mainnet through
+bootnodes pinned as IP multiaddrs (`MAINNET_BOOTNODES` in `rust/swarm/src/lib.rs`), and a
+`dev` network's bootnodes must be IP multiaddrs too. Its first peers come about 10 s after it
+starts: bee holds the handshake of a peer that advertises no address for that long.
+
+Without the reader (`-PswarmEngine=false`, a cargo build without `--features swarm`, iOS, the
+Java and Go engines), every call is refused with the permanent `-32602`, and so are the
+settings: a daemon told to use the history does not start without it.
 
 ## The settings
 
@@ -122,7 +148,7 @@ With an index on a Swarm network the node can reach (a local bee-factory holding
 Swarm mainnet):
 
 1. Start a reader build with the settings: `myotis-rpcd … --address-history-config <file>`, or
-   the daemon with `-PswarmEngine -PaddressHistoryConfig=<file>`.
+   the daemon with `-PaddressHistoryConfig=<file>`.
 2. Wait for the beacon to be `SYNCED` (`beacon-status` on the daemon, `GET /` →
    `beacon=SYNCED` on `myotis-rpcd`): the head gap and the verify call need a verified head.
 3. Read a busy address's newest page, and one with a `toBlock` deep below the head.

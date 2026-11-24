@@ -7,19 +7,22 @@
 //! verified chain data (part 6) says otherwise.
 //!
 //! **Refused with the permanent `-32602`, never an empty list** (the carve-out):
-//! - a build without the reader (no `swarm` feature), and Android and iOS in this version;
+//! - a build without the reader (no `swarm` feature), and iOS (Android reads it: owner's
+//!   decision, 2026-11-24);
 //! - without an importer key (an experimental setting: the user trusts that importer);
 //! - while Tor routing is on (the embedded node does not route through Tor).
 //!
-//! The settings are engine-wide ([`set_config_json`]); the node starts on the first read and
-//! is replaced when the Swarm network changes.
+//! The settings are engine-wide ([`set_config_json`]); the node starts on the first read, is
+//! replaced when the Swarm network changes, and stops when no chain runs any more
+//! ([`chains_idle`]: the last running handle paused or stopped), so an idle-slept engine
+//! keeps no Swarm connection open. The next read starts it again, with its cold start.
 
 use crate::eljson;
 
 /// Why every read is refused in a build like this one, if it is.
 fn build_refusal() -> Option<&'static str> {
-    if cfg!(any(target_os = "android", target_os = "ios")) {
-        return Some("the address history is not available on mobile in this version");
+    if cfg!(target_os = "ios") {
+        return Some("the address history is not available on iOS in this version");
     }
     if !cfg!(feature = "swarm") {
         return Some("the address history needs the Swarm reader, which this build does not include");
@@ -101,8 +104,13 @@ pub fn parse_config(json: &str) -> Result<Config, String> {
                     }
                     #[cfg(feature = "swarm")]
                     for b in &bootnodes {
-                        b.parse::<myotis_swarm::Multiaddr>()
+                        let addr = b
+                            .parse::<myotis_swarm::Multiaddr>()
                             .map_err(|_| format!("invalid bootnode multiaddr '{b}'"))?;
+                        // The reader resolves no names (ant's `dnsaddr` feature is off).
+                        if myotis_swarm::needs_dns(&addr) {
+                            return Err(format!("bootnode '{b}' names a host by DNS: give an /ip4/ or /ip6/ multiaddr"));
+                        }
                     }
                     Network::Dev { network_id, bootnodes }
                 }
@@ -186,6 +194,14 @@ fn config() -> Config {
 /// The refusal of a build without the reader, before the chain handle is even looked up.
 pub fn early_refusal() -> Option<String> {
     build_refusal().map(|why| eljson::invalid_params_json(why))
+}
+
+/// No chain handle runs any more (the last one paused for idle sleep, or stopped): the
+/// reader's node stops with them, so no Swarm connection, ping or timer outlives the chains'
+/// networking (a read needs a running handle anyway). The next read starts a new node and pays
+/// its cold start (about 10 s to the first peer).
+pub fn chains_idle() {
+    reader::stop();
 }
 
 /// Tor routing was turned on: the reader stops, so no Swarm connection outlives the switch
@@ -898,6 +914,18 @@ mod reader {
         Ok((Arc::clone(&running.node), running.started))
     }
 
+    /// Whether a node runs (is held here).
+    #[cfg(test)]
+    pub fn running() -> bool {
+        NODE.lock().map(|s| s.is_some()).unwrap_or(false)
+    }
+
+    /// Start the node for `network` without reading anything.
+    #[cfg(test)]
+    pub fn start_for_test(network: &Network) -> Arc<SwarmNode> {
+        node(network).map(|(n, _)| n).unwrap_or_else(|_| panic!("the node did not start"))
+    }
+
     fn hint(chain_id: u64, importer: [u8; 20]) -> u64 {
         NODE.lock().ok().and_then(|s| s.as_ref().and_then(|r| r.hints.get(&(chain_id, importer)).copied())).unwrap_or(0)
     }
@@ -1027,6 +1055,12 @@ mod tests {
             assert!(parse_config(bad).is_err(), "{bad}");
             let v: serde_json::Value = serde_json::from_str(&set_config_json(bad)).unwrap();
             assert_eq!(v["code"], eljson::INVALID_PARAMS, "{bad}");
+        }
+        // The reader resolves no names, so a DNS bootnode is refused, not left to fail later.
+        #[cfg(feature = "swarm")]
+        for dns in ["/dns4/bee.local/tcp/1634", "/dnsaddr/mainnet.ethswarm.org"] {
+            let bad = format!(r#"{{"swarm":{{"network":"dev","networkId":7,"bootnodes":["{dns}"]}}}}"#);
+            assert!(parse_config(&bad).unwrap_err().contains("DNS"), "{dns}");
         }
     }
 
@@ -1206,12 +1240,33 @@ mod tests {
         let code = |json: String| serde_json::from_str::<serde_json::Value>(&json).unwrap()["code"].clone();
         // Without an importer (or without the reader in this build): -32602, never [].
         let none = refusal(&Config::default()).expect("refused");
-        assert!(none.contains("importer") || none.contains("Swarm reader") || none.contains("mobile"), "{none}");
+        assert!(none.contains("importer") || none.contains("Swarm reader") || none.contains("iOS"), "{none}");
         // The arguments are checked once the reader may run; with the default settings the
         // refusal comes first, so check the shapes through parse_cursor/limit rules here.
         let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
         assert_eq!(code(history_json(&rt, 1, None, Trust::default(), "0x00", "{}")), serde_json::json!(eljson::INVALID_PARAMS));
         assert_eq!(parse_address(&format!("0x{}", "+f".repeat(20))), None, "a '+' is no hex digit");
+    }
+
+    /// The last chain going idle stops the node at once, and the next read starts a new one.
+    /// A dev network with one unreachable bootnode (TEST-NET-1): the node runs, dials nowhere
+    /// that answers, and opens no listener.
+    #[cfg(feature = "swarm")]
+    #[test]
+    fn the_node_stops_when_no_chain_runs() {
+        let dev = Network::Dev { network_id: 4020, bootnodes: vec!["/ip4/192.0.2.1/tcp/1634".into()] };
+        let first = reader::start_for_test(&dev);
+        assert!(first.is_running() && reader::running());
+        chains_idle();
+        assert!(!reader::running(), "the node is still held after the chains went idle");
+        let stopped = std::time::Instant::now();
+        while first.is_running() && stopped.elapsed() < std::time::Duration::from_secs(5) {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert!(!first.is_running(), "the node still runs after the chains went idle");
+        let second = reader::start_for_test(&dev);
+        assert!(second.is_running() && !std::sync::Arc::ptr_eq(&first, &second));
+        chains_idle();
     }
 
     /// Live, against a local Swarm network holding an index: `MYOTIS_ADDR1_DEV="<network id>
