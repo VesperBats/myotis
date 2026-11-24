@@ -35,14 +35,15 @@ its trust anchors and release checks.
   and no external address in identify, and it makes no DNS query. A peer it
   dials still learns the public IP and port it sees the connection come from:
   each BZZ handshake echoes that address back to the peer, signed with the
-  session's fresh key, as for any node behind NAT. It
-  joins Swarm mainnet through seven pinned IP bootnodes, and hickory-resolver
-  0.25 and libp2p-dns are no longer built. A cold start takes about 10 s
-  longer before the first read, the time bee waits for the identify addresses
-  of a peer that advertises none. Two patches to the vendored ant
-  (`rust/vendor/ant-patches`), sent upstream as freedom-hq/ant#276 and #277.
-  A panic in ant still ends the host process (freedom-hq/ant#271, accepted for
-  now) (#920).
+  session's fresh key, as for any node behind NAT. It dials globally routable
+  addresses only: a private address a peer names, even one on the user's own
+  LAN, is never dialed. It joins Swarm mainnet through seven pinned IP
+  bootnodes, and hickory-resolver 0.25 and libp2p-dns are no longer built. A
+  cold start takes about 10 s longer before the first read, the time bee
+  waits for the identify addresses of a peer that advertises none. Three
+  patches to the vendored ant (`rust/vendor/ant-patches`), sent upstream as
+  freedom-hq/ant#276, #277 and #278. A panic in ant still ends the host
+  process (freedom-hq/ant#271, accepted for now) (#920).
 
 ## [0.1.22] - 2026-11-23
 

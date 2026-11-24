@@ -54,6 +54,16 @@ patch file and its entry here (the script stops on a patch that no longer applie
   multiaddrs (`MAINNET_BOOTNODES` in `rust/swarm/src/lib.rs`): no DNS query at run time.
   The PR also turns the feature on explicitly for `ant-ffi` and adds CI steps; those files
   are not vendored, so the patch leaves them out.
+- `ant-patches/0003-public-dials-only.patch`, upstream PR
+  https://github.com/freedom-hq/ant/pull/278. `NodeConfig::public_dials_only` /
+  `RunConfig::public_dials_only` (default off): only globally routable underlays are
+  dialed, never a private one, not even inside the host's own subnets (the same-LAN
+  exception of ant's underlay filter, `LocalSubnets`), and the host's interfaces are not
+  read for it. Why: a hive entry is signed only by the peer it describes, so any Swarm peer
+  could have the reader open TCP connections to hosts on the user's LAN, on a port it picks
+  (review of VesperBats/myotis#920). `rust/swarm` turns it on for Swarm mainnet (a `dev`
+  network lives on a LAN and keeps `allow_private_dials`). The PR's row in ant's
+  `docs/ffi-parity-audit.md` is not vendored, so the patch leaves it out.
 
 The third open item, freedom-hq/ant#271 (a panic on peer input aborts the host under
 `panic = "abort"`), has no patch: accepted for now (owner's decision, 2026-11-24), the issue
@@ -101,7 +111,8 @@ alerts) can name it, as a git pin or as a copy. Its registry dependencies stay c
 through `rust/swarm/Cargo.lock`; ant's own code, which parses what Swarm peers send, is
 not. A security fix in ant reaches Myotis only when someone moves this copy. Of the three
 open items `rust/swarm/src/lib.rs` lists, freedom-hq/ant#269 and #270 are fixed here by the
-patches above until upstream merges them, and #271 is accepted for now.
+patches above until upstream merges them, and #271 is accepted for now. (The third patch,
+for LAN dials, has no issue upstream; its PR is #278.)
 
 Who watches it (owner's decision, 2026-11-24): `.github/workflows/ant-upstream-watch.yml`,
 daily (`scripts/ant_upstream_watch.sh`). It compares upstream's default branch with the
@@ -113,7 +124,8 @@ commit whose message reads like a security fix, an advisory, one of the three is
 other upstream commits only refresh the issue's description. The owner, acting on the
 issue, decides whether the copy moves and whether a release follows; the workflow never
 re-vendors and never closes the issue. The issues' states also say when a patch can go:
-upstream's merge of #276 or #277 closes #269 or #270.
+upstream's merge of #276 or #277 closes #269 or #270. #278 closes no issue and the watch
+does not follow its state; its merge shows only among the upstream commits the issue lists.
 
 ## The SBOM
 

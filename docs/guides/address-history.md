@@ -59,7 +59,8 @@ that pages through a history should do so while its chain is awake.
 
 On every platform the embedded node is outbound only (no listener, no UPnP port mapping, no
 external address in identify; each BZZ handshake still echoes back, signed, the public address
-the peer saw it dial from) and makes no DNS query: it joins Swarm mainnet through
+the peer saw it dial from), dials globally routable addresses only (never a private one a
+peer names, not even on the user's own LAN) and makes no DNS query: it joins Swarm mainnet through
 bootnodes pinned as IP multiaddrs (`MAINNET_BOOTNODES` in `rust/swarm/src/lib.rs`), and a
 `dev` network's bootnodes must be IP multiaddrs too. Its first peers come about 10 s after it
 starts: bee holds the handshake of a peer that advertises no address for that long.

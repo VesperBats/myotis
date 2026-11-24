@@ -15,8 +15,9 @@
 //! channel ([`ant_control::ControlCommand`]), the in-process interface `antd`'s own control
 //! socket uses.
 //!
-//! **Linked into the engine behind its `swarm` feature, which every shipped build turns on**
-//! (desktop and Android; owner's decision, 2026-11-24). On 2026-11-20 the owner had ant's
+//! **Linked into the engine behind its `swarm` feature, which every shipped desktop and
+//! Android build turns on** (owner's decision, 2026-11-24; the Node.js addon is built without
+//! it). On 2026-11-20 the owner had ant's
 //! three open items settled before any release that turns `swarm` on; on 2026-11-24 the owner
 //! decided to patch the vendored copy for the first two and send the same changes upstream,
 //! and to accept the third for now:
@@ -45,6 +46,15 @@
 //!   decision, 2026-11-24). ant runs inside the engine under the workspace's
 //!   `panic = "abort"`: a panic anywhere in its networking code, on input from any Swarm
 //!   peer, ends the host process.
+//!
+//! **A third patch, beyond those three items: no LAN dials** (`rust/vendor/ant-patches/0003`,
+//! freedom-hq/ant#278; from the review of VesperBats/myotis#920). Unpatched, ant's underlay filter keeps a peer's
+//! private address when it lies in one of the host's own subnets, so that a bee node on the
+//! same Wi-Fi can be reached; a hive entry is signed only by the peer it describes, so any
+//! Swarm peer could have the reader open TCP connections to hosts on the user's LAN, on a
+//! port it picks. On Swarm mainnet this crate starts the node with ant's
+//! `public_dials_only`: it dials globally routable addresses only (a `dev` network, which
+//! lives on a LAN, keeps `allow_private_dials`).
 //!
 //! ant itself is vendored (`rust/vendor/ant`, its `VENDORED.md`): no build fetches it from
 //! GitHub, and the copy is upstream's at one commit plus exactly those patches, each dropped
@@ -152,6 +162,10 @@ pub struct SwarmConfig {
     pub bootnodes: Vec<Multiaddr>,
     /// Dial peers' private and loopback addresses: a local dev network only.
     pub allow_private_dials: bool,
+    /// Dial globally routable addresses only, never a private one, not even on the host's own
+    /// LAN (ant's `public_dials_only`, `rust/vendor/ant-patches/0003`): a peer's hive gossip
+    /// cannot steer the reader to hosts on the user's network. Swarm mainnet only.
+    pub public_dials_only: bool,
     /// File for the warm-restart peer snapshot (`None`: start cold every time).
     pub peerstore_path: Option<PathBuf>,
     /// Peers the node keeps connected.
@@ -179,6 +193,7 @@ impl SwarmConfig {
                 })
                 .collect(),
             allow_private_dials: false,
+            public_dials_only: true,
             peerstore_path: None,
             target_peers: READER_PEERS,
             chunk_timeout: Duration::from_secs(60),
@@ -191,6 +206,7 @@ impl SwarmConfig {
             network_id,
             bootnodes,
             allow_private_dials: true,
+            public_dials_only: false,
             peerstore_path: None,
             target_peers: READER_PEERS,
             chunk_timeout: Duration::from_secs(30),
@@ -237,6 +253,7 @@ impl SwarmNode {
         )
         .with_network_id(cfg.network_id)
         .with_allow_private_dials(cfg.allow_private_dials)
+        .with_public_dials_only(cfg.public_dials_only)
         // A reader: no listener, no UPnP mapping, no address of ours announced (ant#269).
         .with_outbound_only(true)
         .with_status(status_tx)
@@ -436,6 +453,8 @@ mod tests {
         }
         let cfg = SwarmConfig::mainnet();
         assert_eq!(cfg.bootnodes.len(), MAINNET_BOOTNODES.len());
+        // No private address is dialed on mainnet, not even on the host's own LAN (patch 0003).
+        assert!(cfg.public_dials_only && !cfg.allow_private_dials);
         let mut peers = std::collections::HashSet::new();
         for addr in &cfg.bootnodes {
             let parts: Vec<Protocol> = addr.iter().collect();
