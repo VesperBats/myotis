@@ -50,9 +50,10 @@ On Android, an embedder of the AAR sets the settings with
 desktop.
 
 On every platform the embedded node is outbound only (no listener, no UPnP port mapping, no
-address of its own announced to peers) and makes no DNS query: it joins Swarm mainnet through
+address of its own advertised to peers) and makes no DNS query: it joins Swarm mainnet through
 bootnodes pinned as IP multiaddrs (`MAINNET_BOOTNODES` in `rust/swarm/src/lib.rs`), and a
-`dev` network's bootnodes must be IP multiaddrs too.
+`dev` network's bootnodes must be IP multiaddrs too. Its first peers come about 10 s after it
+starts: bee holds the handshake of a peer that advertises no address for that long.
 
 Without the reader (`-PswarmEngine=false`, a cargo build without `--features swarm`, iOS, the
 Java and Go engines), every call is refused with the permanent `-32602`, and so are the

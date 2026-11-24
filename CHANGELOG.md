@@ -23,9 +23,11 @@ its trust anchors and release checks.
 
 - Swarm reader (the embedded `ant` node behind the address history): it is
   outbound only, with no listener, no UPnP port mapping on the user's router
-  and no address of its own announced to peers, and it makes no DNS query. It
+  and no address of its own advertised to peers, and it makes no DNS query. It
   joins Swarm mainnet through seven pinned IP bootnodes, and hickory-resolver
-  0.25 and libp2p-dns are no longer built. Two patches to the vendored ant
+  0.25 and libp2p-dns are no longer built. A cold start takes about 10 s
+  longer before the first read, the time bee waits for the identify addresses
+  of a peer that advertises none. Two patches to the vendored ant
   (`rust/vendor/ant-patches`), sent upstream as freedom-hq/ant#276 and #277.
   A panic in ant still ends the host process (freedom-hq/ant#271, accepted for
   now) (#920).

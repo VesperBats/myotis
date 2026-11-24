@@ -75,6 +75,7 @@ CRATES_IO = "registry+https://github.com/rust-lang/crates.io-index"
 # patches is named on every crate of the tree (property `myotis:patched-by`).
 VENDOR_DIR = "rust/vendor"
 PATCHES_SUFFIX = "-patches"
+PATCH_NAME = re.compile(r"[0-9]{4}-[a-z0-9-]+\.patch")
 
 # Modules whose coordinates depend on the build host. The root build keeps them
 # out of the lock state (dependencyLocking.ignoredDependencies) while
@@ -316,9 +317,10 @@ def vendored_crates(root):
     for series in (d for d in dirs if d.name.endswith(PATCHES_SUFFIX)):
         if not (base / series.name.removesuffix(PATCHES_SUFFIX)).is_dir():
             raise SbomError(f"{series}: a patch series without its vendored tree")
-        stray = [f.name for f in series.iterdir() if not (f.is_file() and f.suffix == ".patch")]
+        # The names scripts/vendor_ant.sh applies, and nothing else: it refuses any other file.
+        stray = [f.name for f in series.iterdir() if not (f.is_file() and PATCH_NAME.fullmatch(f.name))]
         if stray:
-            raise SbomError(f"{series}: holds {', '.join(sorted(stray))}, not only *.patch files")
+            raise SbomError(f"{series}: holds {', '.join(sorted(stray))}, not only NNNN-<name>.patch files")
     for tree in (d for d in dirs if not d.name.endswith(PATCHES_SUFFIX)):
         series = base / (tree.name + PATCHES_SUFFIX)
         patches = tuple(sorted(str(f.relative_to(root)) for f in series.glob("*.patch"))) if series.is_dir() else ()

@@ -112,7 +112,7 @@ index f667e79..707d07d 100644
  [lints]
  workspace = true
 diff --git a/crates/ant-p2p/src/behaviour.rs b/crates/ant-p2p/src/behaviour.rs
-index b2c5b4c..6318242 100644
+index f538b0f..f4ce342 100644
 --- a/crates/ant-p2p/src/behaviour.rs
 +++ b/crates/ant-p2p/src/behaviour.rs
 @@ -2,6 +2,7 @@
@@ -223,7 +223,7 @@ index b2c5b4c..6318242 100644
          .with_behaviour(|_| behaviour)
          .expect("infallible behaviour")
          .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(u64::MAX)))
-@@ -10297,6 +10336,30 @@ mod tests {
+@@ -10298,6 +10337,30 @@ mod tests {
          assert!(check_outbound_only(false, &[manual]).is_ok());
      }
  

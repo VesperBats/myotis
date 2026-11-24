@@ -338,8 +338,8 @@ class MadeUp(unittest.TestCase):
         with self.assertRaisesRegex(sbom.SbomError, "a patch series without its vendored tree"):
             self.build("native")
         self.tree.write("rust/vendor/gone/VENDORED.md", "Upstream: https://example.org/g\nCommit: " + "a" * 40 + "\n")
-        self.tree.write("rust/vendor/gone-patches/notes.txt", "")
-        with self.assertRaisesRegex(sbom.SbomError, "not only"):
+        self.tree.write("rust/vendor/gone-patches/wip.patch", "")
+        with self.assertRaisesRegex(sbom.SbomError, "wip.patch, not only"):
             self.build("native")
 
     def test_a_vendored_tree_without_its_notes_is_an_error(self):

@@ -24,8 +24,14 @@
 //!   Unpatched, ant listens on `0.0.0.0` and runs libp2p's UPnP behaviour, which asks the
 //!   local router for a port mapping and announces the public address to peers. This crate
 //!   starts every node with ant's `outbound_only`: no listener, no UPnP, and no external
-//!   address of ours announced (neither a mapped one nor one a peer observed). Peers see the
-//!   address of the connection the node dials them from, as for any node behind NAT.
+//!   address of ours announced (neither a mapped one nor one a peer observed). A peer sees
+//!   the address of the connection the node dials it from, and the BZZ handshake echoes that
+//!   address back to it; bee keeps no address of a light node in its address book and does
+//!   not gossip light nodes to other peers (`pkg/p2p/libp2p` and `kademlia.Announce` in
+//!   ethersphere/bee). The cost: with no address in identify, bee holds each inbound
+//!   handshake for its 10 s peerstore wait, so a cold start has its first BZZ peer after
+//!   about 10 s (measured 2026-11-24: first peer 10.1 s, 8 serving peers 16 s), once per
+//!   start, as the handshakes run in parallel.
 //! - **Fixed by a patch: no DNS** (freedom-hq/ant#270, `rust/vendor/ant-patches/0002`).
 //!   Unpatched, ant resolves `/dnsaddr` bootnodes with hickory-resolver 0.25.2, the version
 //!   with known advisories that `myotis-net` keeps out of its own graph on purpose, and on
@@ -486,9 +492,12 @@ mod tests {
     }
 
     /// Swarm mainnet through the pinned bootnodes alone (not run by default: it needs the
-    /// network). The node gets peers, a read is answered (a random address: not delivered),
-    /// and it never listens or announces an address of its own. Run it when the pins move:
-    /// `cargo test --manifest-path rust/swarm/Cargo.toml -- --ignored --nocapture mainnet`.
+    /// network). The node completes BZZ handshakes with peers that can serve retrievals, a read
+    /// is answered (a random address: not delivered), and it never listens or announces an
+    /// address of its own. Prints how long the handshakes took (bee waits up to 10 s for a
+    /// peer's identify addresses, which an outbound-only node has none of). Run it when the
+    /// pins move: `cargo test --manifest-path rust/swarm/Cargo.toml -- --ignored --nocapture
+    /// mainnet`.
     #[test]
     #[ignore]
     fn mainnet_through_the_pinned_bootnodes() {
@@ -499,29 +508,33 @@ mod tests {
             .unwrap();
         rt.block_on(async {
             let t = Instant::now();
-            let mut first = None;
-            while node.connected_peers() < 8 && t.elapsed() < Duration::from_secs(90) {
-                if first.is_none() && node.connected_peers() > 0 {
-                    first = Some(t.elapsed());
-                }
+            let (mut first_bzz, mut first_serving) = (None, None);
+            loop {
                 let st = node.status.borrow().clone();
                 assert!(st.listeners.is_empty(), "listening on {:?}", st.listeners);
-                assert!(
-                    st.external_addresses.is_empty(),
-                    "announcing {:?}",
-                    st.external_addresses
-                );
-                tokio::time::sleep(Duration::from_millis(200)).await;
+                assert!(st.external_addresses.is_empty(), "announcing {:?}", st.external_addresses);
+                let routing = &st.peers.routing;
+                if first_bzz.is_none() && routing.size > 0 {
+                    first_bzz = Some(t.elapsed());
+                }
+                if first_serving.is_none() && routing.serving > 0 {
+                    first_serving = Some(t.elapsed());
+                }
+                if routing.serving >= 8 || t.elapsed() > Duration::from_secs(90) {
+                    println!(
+                        "first BZZ handshake after {first_bzz:?}, first serving peer after \
+                         {first_serving:?}; {} serving, {} in the routing table, {} connections \
+                         after {:?}",
+                        routing.serving,
+                        routing.size,
+                        st.peers.connected,
+                        t.elapsed()
+                    );
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
             }
-            println!(
-                "first peer after {first:?}; {} peers after {:?}",
-                node.connected_peers(),
-                t.elapsed()
-            );
-            assert!(
-                node.connected_peers() > 0,
-                "no peer through the pinned bootnodes"
-            );
+            assert!(first_serving.is_some(), "no serving peer through the pinned bootnodes");
             let t = Instant::now();
             let got = node.chunk([0x5a; 32], true).await;
             println!("random chunk: {got:?} after {:?}", t.elapsed());

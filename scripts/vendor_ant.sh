@@ -113,6 +113,14 @@ if [ -d "$patches_dir" ]; then
     patches+=("$f")
   done
 fi
+# And the other way round: every patch VENDORED.md names is in the series, so the notes
+# never describe a patch that is not applied.
+for named in $(grep -o 'ant-patches/[0-9]\{4\}-[a-z0-9-]*\.patch' "$dest/VENDORED.md" 2>/dev/null | sort -u); do
+  if [ ! -f "$root/rust/vendor/$named" ]; then
+    echo "rust/vendor/ant/VENDORED.md names rust/vendor/$named, which is not in the series" >&2
+    exit 1
+  fi
+done
 # A git directory of its own for `git apply`, so that paths are taken relative to $out
 # whatever repository the temporary directory may sit in; bytes as they are (no autocrlf,
 # no whitespace fixing), and no fuzz: a patch whose context is not exactly there fails.
