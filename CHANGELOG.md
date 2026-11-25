@@ -19,6 +19,8 @@ its trust anchors and release checks.
 
 ## [Unreleased]
 
+## [0.1.24] - 2026-11-25
+
 ### Added
 
 - Address history: every entry `myotis_verifyAddressHistoryEntries` checked
@@ -31,6 +33,13 @@ its trust anchors and release checks.
 ### Changed
 
 - Engine ABI 61 (0.1.23 shipped 60): the verdicts' `blockTimestamp` (#924).
+- Trust anchors: the embedded checkpoints of mainnet, Gnosis and Sepolia
+  moved to 2026-11-25 (mainnet slot 15,731,456, Gnosis slot 31,321,840,
+  Sepolia slot 11,655,680) in the Java and Rust engines, and mainnet's in the
+  Go engine too. The checkpoint table extends to block 26,491,578,
+  cross-checked against a second node. The mainnet bootnodes still equal
+  go-ethereum's, and the seven pinned Swarm bootnodes still equal what
+  `/dnsaddr/mainnet.ethswarm.org` resolves to in every region.
 
 ## [0.1.23] - 2026-11-24
 
@@ -761,7 +770,8 @@ MetaMask; ENS with CCIP-Read; mainnet and Gnosis Chain; the Android app, the
 shared Compose Multiplatform UI and the macOS dmg; and `:myotis-api`, the
 engine contract (#1 to #123).
 
-[Unreleased]: https://github.com/biafra23/myotis/compare/v0.1.23...HEAD
+[Unreleased]: https://github.com/biafra23/myotis/compare/v0.1.24...HEAD
+[0.1.24]: https://github.com/biafra23/myotis/compare/v0.1.23...v0.1.24
 [0.1.23]: https://github.com/biafra23/myotis/compare/v0.1.22...v0.1.23
 [0.1.22]: https://github.com/biafra23/myotis/compare/v0.1.21...v0.1.22
 [0.1.21]: https://github.com/biafra23/myotis/compare/v0.1.21-rc1...v0.1.21

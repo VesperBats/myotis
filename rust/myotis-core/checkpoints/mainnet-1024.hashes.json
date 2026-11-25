@@ -1,15 +1,15 @@
 {
   "chain_id": 1,
   "k": 1024,
-  "entries": 25866,
-  "last_entry_block": 26485760,
-  "top_block": 26485995,
-  "top_hash": "0x3d84b431ae1904b42f8ca762f929beec6cc1f775ca713eac303c29f81e48a6a5",
+  "entries": 25871,
+  "last_entry_block": 26490880,
+  "top_block": 26491578,
+  "top_hash": "0x3a2aa2189683177870dbb0bd13794f868111584f702c5c35c8879eda3165313a",
   "top_pinned_by": "the finalized block of the source node (erigon/3.8.1-cf6f1413/linux-amd64/go1.27.3), cross-checked against Geth/v1.17.7-stable-3d858f85/linux-amd64/go1.27.1: 203 entries and the top block equal",
   "genesis_hash": "0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3",
-  "table_keccak256": "0xcb318629e238aa34b1439cc62e6ae3bcfc1a564906dcb0e7fc3b4cf5bb7c523a",
+  "table_keccak256": "0x010a1eb489899bb50571de634be2acf8ebaf3863dc8e3f6a5a120554f029f9be",
   "source_client": "erigon/3.8.1-cf6f1413/linux-amd64/go1.27.3",
-  "generated_unix": 1795536252,
+  "generated_unix": 1795603307,
   "extended_from": [
     {
       "top_block": 26457537,
@@ -31,6 +31,13 @@
       "top_pinned_by": "the finalized block of the source node (erigon/3.8.1-cf6f1413/linux-amd64/go1.27.3), cross-checked against Geth/v1.17.7-stable-3d858f85/linux-amd64/go1.27.1: 203 entries and the top block equal",
       "source_client": "erigon/3.8.1-cf6f1413/linux-amd64/go1.27.3",
       "table_keccak256": "0xe6cbcf4709eaf0b6023af03903091a9783e4faac24ef7c62b34b3465e9e8013f"
+    },
+    {
+      "top_block": 26485995,
+      "top_hash": "0x3d84b431ae1904b42f8ca762f929beec6cc1f775ca713eac303c29f81e48a6a5",
+      "top_pinned_by": "the finalized block of the source node (erigon/3.8.1-cf6f1413/linux-amd64/go1.27.3), cross-checked against Geth/v1.17.7-stable-3d858f85/linux-amd64/go1.27.1: 203 entries and the top block equal",
+      "source_client": "erigon/3.8.1-cf6f1413/linux-amd64/go1.27.3",
+      "table_keccak256": "0xcb318629e238aa34b1439cc62e6ae3bcfc1a564906dcb0e7fc3b4cf5bb7c523a"
     }
   ]
 }

@@ -150,16 +150,18 @@ impl<'a> CheckpointTable<'a> {
 /// extended for v0.1.21 (2026-11-22) by `--extend` (eth2swarm `2707995`), which reproduced the
 /// old last entry (block 26,457,088) and linked every header from it through the old top up to
 /// the new one; extended again for v0.1.22 (2026-11-23) the same way, from the old last entry
-/// (block 26,467,328) through the old top (26,467,996), and for v0.1.23 (2026-11-24), from the
-/// old last entry (block 26,476,544) through the old top (26,476,643). Each top is the source
-/// node's finalized block, cross-checked against Geth 1.17.7 (203 entries and the top equal). The
-/// sidecar `mainnet-1024.hashes.json` records the same, `extended_from` included.
+/// (block 26,467,328) through the old top (26,467,996), for v0.1.23 (2026-11-24), from the
+/// old last entry (block 26,476,544) through the old top (26,476,643), and for v0.1.24
+/// (2026-11-25), from the old last entry (block 26,485,760) through the old top (26,485,995).
+/// Each top is the source node's finalized block, cross-checked against Geth 1.17.7 (203 entries
+/// and the top equal). The sidecar `mainnet-1024.hashes.json` records the same, `extended_from`
+/// included.
 pub const MAINNET_PIN: TablePin = TablePin {
-    keccak256: hex32("cb318629e238aa34b1439cc62e6ae3bcfc1a564906dcb0e7fc3b4cf5bb7c523a"),
-    entries: 25_866,
+    keccak256: hex32("010a1eb489899bb50571de634be2acf8ebaf3863dc8e3f6a5a120554f029f9be"),
+    entries: 25_871,
     genesis_hash: hex32("d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3"),
-    top_number: 26_485_995,
-    top_hash: hex32("3d84b431ae1904b42f8ca762f929beec6cc1f775ca713eac303c29f81e48a6a5"),
+    top_number: 26_491_578,
+    top_hash: hex32("3a2aa2189683177870dbb0bd13794f868111584f702c5c35c8879eda3165313a"),
 };
 
 /// Every mainnet table shipped so far, as `(entries, keccak256 of those entries)`, oldest
@@ -171,6 +173,7 @@ pub const MAINNET_SHIPPED: &[(u64, [u8; 32])] =
         (25_848, hex32("2e243c4026af847fb4c31486cec58b4ca8c53022b899562bbb5c5490d8362778")),
         (25_857, hex32("e6cbcf4709eaf0b6023af03903091a9783e4faac24ef7c62b34b3465e9e8013f")),
         (25_866, hex32("cb318629e238aa34b1439cc62e6ae3bcfc1a564906dcb0e7fc3b4cf5bb7c523a")),
+        (25_871, hex32("010a1eb489899bb50571de634be2acf8ebaf3863dc8e3f6a5a120554f029f9be")),
     ];
 
 /// The embedded mainnet table's bytes, as committed.
