@@ -2186,7 +2186,7 @@ dependencies = [
 
 [[package]]
 name = "myotis-addr1"
-version = "0.1.23"
+version = "0.1.24"
 dependencies = [
  "k256",
  "myotis-core",
@@ -2194,7 +2194,7 @@ dependencies = [
 
 [[package]]
 name = "myotis-core"
-version = "0.1.23"
+version = "0.1.24"
 dependencies = [
  "k256",
  "sha2",
