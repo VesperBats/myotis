@@ -22,7 +22,7 @@
 #       if: github.event_name != 'pull_request' && needs.scope.outputs.build != 'false'
 #
 # Callers: desktop-windows-msi, ios-framework. In the queue the answer is the
-# diff from the queue's base to the commit it tests (scripts/queue_scope.py,
+# diff from main's tip to the commit it tests (entries ahead included) (scripts/queue_scope.py,
 # which says how, and scripts/test_queue_scope.py). On every other event it is
 # `true` without asking, so a build job may need this one on a push to main and
 # on a tag: its `if` stays true there, and the release uploads behind it run.
@@ -72,7 +72,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           EVENT: ${{ github.event_name }}
-          BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          BASE_REF: ${{ github.event.merge_group.base_ref }}
           HEAD_SHA: ${{ github.event.merge_group.head_sha }}
           PATHS: ${{ inputs.paths }}
         run: |

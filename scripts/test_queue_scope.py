@@ -79,7 +79,7 @@ class Decide(unittest.TestCase):
 class Main(unittest.TestCase):
     """The script end to end, with a stub `gh` first on PATH."""
 
-    def run_script(self, event, gh_body=None, gh_exit=0, base="a" * 40, head="b" * 40):
+    def run_script(self, event, gh_body=None, gh_exit=0, base="refs/heads/main", head="b" * 40, paths=LIST):
         with tempfile.TemporaryDirectory() as tmp:
             stub = Path(tmp) / "gh"
             body = Path(tmp) / "body.json"
@@ -87,8 +87,8 @@ class Main(unittest.TestCase):
             stub.write_text(f"#!/bin/sh\ncat '{body}'\nexit {gh_exit}\n", encoding="utf-8")
             stub.chmod(0o755)
             out = Path(tmp) / "out"
-            env = dict(os.environ, PATH=f"{tmp}:{os.environ['PATH']}", EVENT=event, BASE_SHA=base,
-                       HEAD_SHA=head, GH_REPO="o/r", PATHS=LIST, GITHUB_OUTPUT=str(out))
+            env = dict(os.environ, PATH=f"{tmp}:{os.environ['PATH']}", EVENT=event, BASE_REF=base,
+                       HEAD_SHA=head, GH_REPO="o/r", PATHS=paths, GITHUB_OUTPUT=str(out))
             r = subprocess.run([sys.executable, "-I", str(SCRIPT)], env=env, capture_output=True, text=True)
             self.assertEqual(r.returncode, 0, r.stderr)
             return out.read_text(encoding="utf-8").strip(), r.stdout
@@ -113,6 +113,18 @@ class Main(unittest.TestCase):
         self.assertEqual(self.run_script("merge_group", "not json")[0], "build=true")
         self.assertEqual(self.run_script("merge_group", '{"message": "Not Found"}')[0], "build=true")
         self.assertEqual(self.run_script("merge_group", '{"files": []}', base="main")[0], "build=true")
+        self.assertEqual(self.run_script("merge_group", '{"files": []}', base="refs/heads/../x")[0], "build=true")
+
+    def test_the_compare_cap_builds(self):
+        body = '{"files": [' + ",".join(f'{{"filename": "docs/{i}.txt"}}' for i in range(300)) + "]}"
+        self.assertEqual(self.run_script("merge_group", body)[0], "build=true")
+        body = '{"files": [' + ",".join(f'{{"filename": "docs/{i}.txt"}}' for i in range(299)) + "]}"
+        self.assertEqual(self.run_script("merge_group", body)[0], "build=false")
+
+    def test_an_unsupported_pattern_builds(self):
+        for pattern in ("docs/?.md", "docs/a+.md", "docs/[ab].md"):
+            self.assertEqual(self.run_script("merge_group", '{"files": [{"filename": "x"}]}', paths=pattern)[0],
+                             "build=true")
 
 
 if __name__ == "__main__":

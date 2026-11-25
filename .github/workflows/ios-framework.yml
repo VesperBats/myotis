@@ -23,7 +23,9 @@ on:
   # change MyotisKit — a docs-only change shouldn't pay a 10x-billed macOS
   # build. The set is everything the framework compiles from: rust/ (the C ABI
   # + engine), :app-ios and the modules it bundles (:myotis-engine-ios, :ui,
-  # :jsonrpc-server), and the Gradle build inputs. The scope job below holds
+  # :jsonrpc-server, :myotis-rpc-policy, :myotis-logindex-presets), and the
+  # Gradle build inputs (gradle.properties among them: its cinterop
+  # commonization flag only this build exercises). The scope job below holds
   # the same list for the merge queue; keep the two in step.
   # Path filters are ignored for TAG pushes (GitHub behaviour, same as the
   # sibling ios-xcframework.yml), so releases still fire regardless.
@@ -36,8 +38,11 @@ on:
       - 'myotis-engine-ios/**'
       - 'ui/**'
       - 'jsonrpc-server/**'
+      - 'myotis-rpc-policy/**'
+      - 'myotis-logindex-presets/**'
       - '**/build.gradle.kts'
       - 'settings.gradle.kts'
+      - 'gradle.properties'
       - 'gradle/libs.versions.toml'
       - '.github/workflows/ios-framework.yml'
       - '.github/workflows/queue-scope.yml'
@@ -90,8 +95,11 @@ jobs:
         myotis-engine-ios/**
         ui/**
         jsonrpc-server/**
+        myotis-rpc-policy/**
+        myotis-logindex-presets/**
         **/build.gradle.kts
         settings.gradle.kts
+        gradle.properties
         gradle/libs.versions.toml
         .github/workflows/ios-framework.yml
         .github/workflows/queue-scope.yml

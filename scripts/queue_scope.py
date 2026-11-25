@@ -7,16 +7,19 @@ Its build job reads this script's answer instead (through .github/workflows/queu
 in the queue, it builds only when the entry changes a file on the workflow's path list, the list
 its `pull_request` trigger was filtered on before the queue.
 
-What the entry changes is the diff from the queue's base (`main`) to the commit the queue tests,
-which also holds the entries queued ahead of it: one compare-API call. FAIL-OPEN: an API error, a
+What the entry changes is the diff from `main` (the merge group's base_ref, so its tip) to the
+commit the queue tests, which also holds the entries queued ahead of it: one compare-API call. Not
+from the group's base_sha, which for an entry with others ahead may be the commit of the entry
+before it; diffing from `main` keeps the scope sound whatever the queue's grouping. FAIL-OPEN: an API error, a
 file list the API capped (300 files) or anything unexpected means "build". On every event but
 `merge_group` the answer is "build" without asking.
 
 Patterns follow GitHub's `paths:` filter: `*` matches within a path segment, `**` across them,
 `**/x` also matches a root `x`, and a pattern starting with `!` excludes what earlier ones matched
-(the last matching pattern wins).
+(the last matching pattern wins). The filter's `?`, `+` and `[...]` are not implemented: a pattern
+with one raises, and the answer is "build".
 
-Environment: EVENT (github.event_name), BASE_SHA and HEAD_SHA (the merge_group's), PATHS (the
+Environment: EVENT (github.event_name), BASE_REF and HEAD_SHA (the merge_group's), PATHS (the
 patterns, one per line; `#` starts a comment), GH_REPO, GH_TOKEN; GITHUB_OUTPUT gets
 `build=true|false`. Tests: scripts/test_queue_scope.py. Standard library and `gh` only.
 """
@@ -33,10 +36,15 @@ import sys
 COMPARE_FILE_CAP = 300
 
 SHA = re.compile(r"[0-9a-f]{40}")
+BRANCH_REF = re.compile(r"refs/heads/[A-Za-z0-9._/-]+")
+UNSUPPORTED = "?+["
 
 
 def glob_to_regex(pattern: str) -> re.Pattern[str]:
     """Translates one `paths:` glob into an anchored regular expression."""
+    if any(c in pattern for c in UNSUPPORTED):
+        # Under-matching would skip a required build: refuse, and main() builds.
+        raise ValueError(f"pattern {pattern!r} uses ?, + or [...], which this filter does not implement")
     out = []
     i = 0
     while i < len(pattern):
@@ -48,9 +56,6 @@ def glob_to_regex(pattern: str) -> re.Pattern[str]:
             i += 2
         elif pattern[i] == "*":
             out.append("[^/]*")
-            i += 1
-        elif pattern[i] == "?":
-            out.append("[^/]")
             i += 1
         else:
             out.append(re.escape(pattern[i]))
@@ -127,11 +132,12 @@ def main() -> int:
         answer(True, f"not a merge-queue entry ({event or 'no event'})")
         return 0
     try:
-        base = os.environ.get("BASE_SHA", "")
+        base_ref = os.environ.get("BASE_REF", "")
         head = os.environ.get("HEAD_SHA", "")
         repo = os.environ.get("GH_REPO", "")
-        if not (SHA.fullmatch(base) and SHA.fullmatch(head)):
-            raise ValueError(f"unexpected base or head sha ({base!r}, {head!r})")
+        if not (BRANCH_REF.fullmatch(base_ref) and ".." not in base_ref and SHA.fullmatch(head)):
+            raise ValueError(f"unexpected base ref or head sha ({base_ref!r}, {head!r})")
+        base = base_ref.removeprefix("refs/heads/")
         if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo):
             raise ValueError(f"unexpected repository name {repo!r}")
         files, truncated = compare_files(repo, base, head)
