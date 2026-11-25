@@ -26,11 +26,11 @@ its trust anchors and release checks.
   `blockTimestamp`, the unix time of the block it was checked in, from the
   same verified header as its `blockHash`, so a host can date the row. A kept
   verdict, and so a later page that shows it, carries it too. An entry that
-  was not checked carries neither.
+  was not checked carries neither (#924, #899).
 
 ### Changed
 
-- Engine ABI 61 (0.1.23 shipped 60): the verdicts' `blockTimestamp`.
+- Engine ABI 61 (0.1.23 shipped 60): the verdicts' `blockTimestamp` (#924).
 
 ## [0.1.23] - 2026-11-24
 
