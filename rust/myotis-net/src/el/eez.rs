@@ -88,8 +88,41 @@ fn add_be(mut word: [u8; 32], n: u8) -> [u8; 32] {
     word
 }
 
+/// A verified L1 state: its root, and the L1 beacon slot whose FINALIZED
+/// execution state it is. The pairing is the caller's to vouch for: both come
+/// from the L1 chain's own anchor (on mainnet the sync-committee
+/// `ExecAnchor`'s finalized execution), never from a peer and never from a
+/// head that can still reorg. The slot is what orders settlements, so it
+/// travels with the root into [`settled_l2_hash`] and out in [`SettledHash`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct L1State {
+    pub slot: u64,
+    pub state_root: [u8; 32],
+}
+
+/// An L2 block hash proven in the registry of one [`L1State`]. Built only by
+/// [`settled_l2_hash`], so its slot is the slot of the root it was proven
+/// against.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SettledHash {
+    l1_slot: u64,
+    hash: [u8; 32],
+}
+
+impl SettledHash {
+    /// The L1 slot whose finalized state named this hash.
+    pub fn l1_slot(&self) -> u64 {
+        self.l1_slot
+    }
+
+    /// The settled L2 block hash.
+    pub fn hash(&self) -> [u8; 32] {
+        self.hash
+    }
+}
+
 /// The L2 block hash the registry holds for `registry.rollup_id`, proven
-/// against `l1_state_root`. `account_proof` and `storage_proof` are root-first
+/// against `l1.state_root`. `account_proof` and `storage_proof` are root-first
 /// node paths, as `eth_getProof` lists them and as
 /// `myotis_wire::snap::fetch::verify_account_proof` /
 /// `verify_storage_proof` return them from a snap answer.
@@ -99,12 +132,12 @@ fn add_be(mut word: [u8; 32], n: u8) -> [u8; 32] {
 /// with no account at that root (a wrong address or the wrong L1), which is a
 /// configuration error, never "nothing settled".
 pub fn settled_l2_hash(
-    l1_state_root: &[u8; 32],
+    l1: &L1State,
     registry: &Registry,
     account_proof: &[Vec<u8>],
     storage_proof: &[Vec<u8>],
-) -> Result<Option<[u8; 32]>, CoreError> {
-    let account = match verify_proof(l1_state_root, &keccak256(&registry.address), account_proof) {
+) -> Result<Option<SettledHash>, CoreError> {
+    let account = match verify_proof(&l1.state_root, &keccak256(&registry.address), account_proof) {
         ProofResult::Found(leaf) => decode_account_leaf(&leaf)?,
         ProofResult::Absent => {
             return Err(CoreError(
@@ -137,7 +170,21 @@ pub fn settled_l2_hash(
     }
     let mut hash = [0u8; 32];
     hash[32 - value.len()..].copy_from_slice(&value);
-    Ok(Some(hash))
+    Ok(Some(SettledHash {
+        l1_slot: l1.slot,
+        hash,
+    }))
+}
+
+/// What a [`SettledBlock`] rests on beyond the L1's own anchor. Carried on
+/// every settled block so that no later wiring can file its root under a
+/// sync-committee label: a read anchored on it needs a `verifyMethod` of its
+/// own (docs/ideas/gnosis-eez.md §2, §4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrustBasis {
+    /// The registry's acceptance rule (the rollup's proof system; on RollupX
+    /// an attester quorum), read through a verified L1 state.
+    RegistrySettlement,
 }
 
 /// A settled L2 block, adopted by [`SettledAnchor::resolve_header`].
@@ -150,6 +197,21 @@ pub struct SettledBlock {
     pub hash: [u8; 32],
     pub state_root: [u8; 32],
     pub timestamp: u64,
+    pub basis: TrustBasis,
+}
+
+/// What [`SettledAnchor::note_settled_hash`] did with a hash.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Note {
+    /// The hash is pending now, waiting for its header.
+    Pending,
+    /// It is the settled block's hash, read again at a later slot: the slot moved.
+    Refreshed,
+    /// A read at a slot older than the settled block's or the pending hash's:
+    /// nothing changed.
+    Ignored,
+    /// The read contradicts an earlier one; see [`SettledAnchor::alarm`].
+    Alarmed,
 }
 
 /// What [`SettledAnchor::resolve_header`] did with a header.
@@ -161,19 +223,53 @@ pub enum Resolve {
     NotPending,
     /// The header's RLP does not hash to its own `hash` field: nothing changed.
     HashMismatch,
-    /// The header IS the pending hash, but it is not above the settled block
-    /// (a lower number, or the same number on another hash) although it was
-    /// read at a later L1 slot. A finalized registry root does not move back,
-    /// so this is refused, the pending hash dropped and the settled block
-    /// kept; what an exposed integration does with it (an alarm, a park) is
-    /// open, see docs/ideas/gnosis-eez.md §4.
+    /// The header IS the pending hash, but not above the settled block (a
+    /// lower number, or the same number on another hash) although it was read
+    /// at a later L1 slot: refused, and raised as an [`Alarm::Regressed`].
     Regressed { settled: u64, offered: u64 },
+}
+
+/// A contradiction between two reads of the registry. Finalized L1 state
+/// neither disagrees with itself nor moves back, so each of these means a
+/// wrong input (a root paired with the wrong slot, a non-finalized read) or a
+/// registry that did what it must not. Sticky: the first one is kept. The
+/// anchor goes on working, and a reader must refuse what rests on it while
+/// [`SettledAnchor::alarm`] is set; what an exposed integration does beyond
+/// that (park, re-anchor, tell the user) is not decided, and the anchor stays
+/// dev-only until it is (docs/ideas/gnosis-eez.md §4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Alarm {
+    /// Two different hashes for one L1 slot.
+    Conflict {
+        l1_slot: u64,
+        first: [u8; 32],
+        second: [u8; 32],
+    },
+    /// A later read names the settled block again after a newer hash was noted.
+    MovedBack {
+        l1_slot: u64,
+        settled: [u8; 32],
+        dropped: [u8; 32],
+    },
+    /// A later read names a block not above the settled one.
+    Regressed {
+        l1_slot: u64,
+        settled: u64,
+        offered: u64,
+    },
 }
 
 #[derive(Debug, Default)]
 struct Inner {
     settled: Option<SettledBlock>,
     pending: Option<(u64, [u8; 32])>,
+    alarm: Option<Alarm>,
+}
+
+impl Inner {
+    fn raise(&mut self, alarm: Alarm) {
+        self.alarm.get_or_insert(alarm);
+    }
 }
 
 /// The settled-block anchor of one EEZ zone: the hash the registry names,
@@ -189,30 +285,62 @@ impl SettledAnchor {
         SettledAnchor::default()
     }
 
-    /// The registry, read in the L1 finalized state of `l1_slot`, names
-    /// `hash`. The settled block's own hash only moves its slot forward; a
-    /// read at a slot older than the settled block's or the pending hash's is
-    /// ignored.
-    pub fn note_settled_hash(&self, l1_slot: u64, hash: [u8; 32]) {
+    /// The registry, read in the L1 finalized state of `noted.l1_slot()`,
+    /// names `noted.hash()`.
+    pub fn note_settled_hash(&self, noted: SettledHash) -> Note {
+        let (slot, hash) = (noted.l1_slot, noted.hash);
         let mut inner = self.inner.lock().expect("settled anchor mutex");
-        if let Some(settled) = inner.settled.as_mut() {
+        if let Some((pending_slot, pending)) = inner.pending {
+            if pending_slot == slot && pending != hash {
+                inner.raise(Alarm::Conflict {
+                    l1_slot: slot,
+                    first: pending,
+                    second: hash,
+                });
+                return Note::Alarmed;
+            }
+        }
+        if let Some(settled) = inner.settled {
+            if settled.l1_slot == slot && settled.hash != hash {
+                inner.raise(Alarm::Conflict {
+                    l1_slot: slot,
+                    first: settled.hash,
+                    second: hash,
+                });
+                return Note::Alarmed;
+            }
             if settled.hash == hash {
-                if l1_slot > settled.l1_slot {
-                    settled.l1_slot = l1_slot;
+                if slot < settled.l1_slot {
+                    return Note::Ignored;
                 }
-                if inner.pending.is_some_and(|(s, _)| s <= l1_slot) {
-                    inner.pending = None;
+                if let Some((pending_slot, pending)) = inner.pending {
+                    if pending_slot < slot {
+                        inner.pending = None;
+                        inner.raise(Alarm::MovedBack {
+                            l1_slot: slot,
+                            settled: hash,
+                            dropped: pending,
+                        });
+                        return Note::Alarmed;
+                    }
                 }
-                return;
+                if let Some(settled) = inner.settled.as_mut() {
+                    settled.l1_slot = slot;
+                }
+                return Note::Refreshed;
             }
-            if l1_slot <= settled.l1_slot {
-                return;
+            if slot < settled.l1_slot {
+                return Note::Ignored;
             }
         }
-        if inner.pending.is_some_and(|(s, _)| s > l1_slot) {
-            return;
+        if inner
+            .pending
+            .is_some_and(|(pending_slot, _)| pending_slot > slot)
+        {
+            return Note::Ignored;
         }
-        inner.pending = Some((l1_slot, hash));
+        inner.pending = Some((slot, hash));
+        Note::Pending
     }
 
     /// The hash waiting for its header, if any.
@@ -243,6 +371,11 @@ impl SettledAnchor {
         let number = header.header.number;
         if let Some(settled) = inner.settled {
             if number <= settled.number {
+                inner.raise(Alarm::Regressed {
+                    l1_slot,
+                    settled: settled.number,
+                    offered: number,
+                });
                 return Resolve::Regressed {
                     settled: settled.number,
                     offered: number,
@@ -255,13 +388,19 @@ impl SettledAnchor {
             hash,
             state_root: header.header.state_root,
             timestamp: header.header.timestamp,
+            basis: TrustBasis::RegistrySettlement,
         });
         Resolve::Adopted
     }
 
-    /// The settled block, once one was adopted.
+    /// The settled block, once one was adopted. Check [`Self::alarm`] first.
     pub fn settled(&self) -> Option<SettledBlock> {
         self.inner.lock().expect("settled anchor mutex").settled
+    }
+
+    /// The first contradiction seen, if any (sticky).
+    pub fn alarm(&self) -> Option<Alarm> {
+        self.inner.lock().expect("settled anchor mutex").alarm
     }
 }
 
@@ -274,6 +413,7 @@ mod tests {
         include_str!("../../../testdata/el/eez/registry-anchor-mainnet-26495425.txt");
 
     struct Vector {
+        l1_block_number: u64,
         l1_block_hash: [u8; 32],
         l1_state_root: [u8; 32],
         l1_header_rlp: Vec<u8>,
@@ -318,6 +458,7 @@ mod tests {
             }
         }
         Vector {
+            l1_block_number: one["l1_block_number"].parse().unwrap(),
             l1_block_hash: word(one["l1_block_hash"]),
             l1_state_root: word(one["l1_state_root"]),
             l1_header_rlp: bytes(one["l1_header_rlp"]),
@@ -348,6 +489,17 @@ mod tests {
         verified(vector().l2_header_rlp)
     }
 
+    fn at(l1_slot: u64, hash: [u8; 32]) -> SettledHash {
+        SettledHash { l1_slot, hash }
+    }
+
+    fn l1(v: &Vector) -> L1State {
+        L1State {
+            slot: 100,
+            state_root: v.l1_state_root,
+        }
+    }
+
     /// A header whose RLP hashes to `hash` is out of reach in a test, so the
     /// "other block" cases offer the vector's header under a pending hash
     /// that is its own, after a settled block placed above or at it.
@@ -358,6 +510,7 @@ mod tests {
             hash,
             state_root: [0; 32],
             timestamp: 0,
+            basis: TrustBasis::RegistrySettlement,
         });
     }
 
@@ -395,36 +548,33 @@ mod tests {
         let v = vector();
         // The L1 header is the block the vector names, and its state root is the root the proofs use.
         assert_eq!(keccak256(&v.l1_header_rlp), v.l1_block_hash);
-        assert_eq!(
-            BlockHeader::decode(&v.l1_header_rlp).unwrap().state_root,
-            v.l1_state_root
-        );
-        let hash = settled_l2_hash(
-            &v.l1_state_root,
-            &v.registry,
-            &v.account_proof,
-            &v.storage_proof,
-        )
-        .unwrap()
-        .expect("rollup 2 has settled");
-        assert_eq!(hash, v.l2_block_hash);
+        let l1_header = BlockHeader::decode(&v.l1_header_rlp).unwrap();
+        assert_eq!(l1_header.number, v.l1_block_number);
+        assert_eq!(l1_header.state_root, v.l1_state_root);
+        let noted = settled_l2_hash(&l1(&v), &v.registry, &v.account_proof, &v.storage_proof)
+            .unwrap()
+            .expect("rollup 2 has settled");
+        assert_eq!(noted, at(100, v.l2_block_hash));
 
         let anchor = SettledAnchor::new();
-        anchor.note_settled_hash(100, hash);
-        assert_eq!(anchor.pending_hash(), Some(hash));
-        assert_eq!(anchor.resolve_header(&l2_header()), Resolve::Adopted);
+        assert_eq!(anchor.note_settled_hash(noted), Note::Pending);
+        assert_eq!(anchor.pending_hash(), Some(v.l2_block_hash));
+        let header = l2_header();
+        assert_eq!(header.header.number, v.l2_block_number);
+        assert_eq!(anchor.resolve_header(&header), Resolve::Adopted);
         assert_eq!(anchor.pending_hash(), None);
-        let settled = anchor.settled().unwrap();
         assert_eq!(
-            settled,
+            anchor.settled().unwrap(),
             SettledBlock {
                 l1_slot: 100,
                 number: v.l2_block_number,
                 hash: v.l2_block_hash,
                 state_root: v.l2_state_root,
                 timestamp: v.l2_timestamp,
+                basis: TrustBasis::RegistrySettlement,
             }
         );
+        assert_eq!(anchor.alarm(), None);
     }
 
     #[test]
@@ -432,7 +582,11 @@ mod tests {
         let v = vector();
         let mut root = v.l1_state_root;
         root[31] ^= 1;
-        assert!(settled_l2_hash(&root, &v.registry, &v.account_proof, &v.storage_proof).is_err());
+        let l1 = L1State {
+            slot: 100,
+            state_root: root,
+        };
+        assert!(settled_l2_hash(&l1, &v.registry, &v.account_proof, &v.storage_proof).is_err());
     }
 
     #[test]
@@ -448,11 +602,7 @@ mod tests {
             let last = nodes.len() - 1;
             let mid = nodes[last].len() / 2;
             nodes[last][mid] ^= 0x01;
-            let got = settled_l2_hash(&v.l1_state_root, &v.registry, &account, &storage);
-            assert!(
-                !matches!(got, Ok(Some(h)) if h == v.l2_block_hash),
-                "tampered {which}: {got:?}"
-            );
+            let got = settled_l2_hash(&l1(&v), &v.registry, &account, &storage);
             assert!(got.is_err(), "tampered {which}: {got:?}");
         }
     }
@@ -466,7 +616,7 @@ mod tests {
             rollup_id: 7,
             ..v.registry
         };
-        let got = settled_l2_hash(&v.l1_state_root, &other, &v.account_proof, &v.storage_proof);
+        let got = settled_l2_hash(&l1(&v), &other, &v.account_proof, &v.storage_proof);
         assert!(!matches!(got, Ok(Some(_))), "{got:?}");
     }
 
@@ -477,16 +627,14 @@ mod tests {
             address: [0x11; 20],
             ..v.registry
         };
-        assert!(
-            settled_l2_hash(&v.l1_state_root, &other, &v.account_proof, &v.storage_proof).is_err()
-        );
+        assert!(settled_l2_hash(&l1(&v), &other, &v.account_proof, &v.storage_proof).is_err());
     }
 
     #[test]
     fn a_header_whose_rlp_does_not_hash_to_its_hash_field_is_refused() {
         let v = vector();
         let anchor = SettledAnchor::new();
-        anchor.note_settled_hash(1, v.l2_block_hash);
+        anchor.note_settled_hash(at(1, v.l2_block_hash));
         let mut forged = l2_header();
         forged.raw_rlp[40] ^= 1;
         assert_eq!(anchor.resolve_header(&forged), Resolve::HashMismatch);
@@ -498,7 +646,7 @@ mod tests {
     fn a_header_nobody_asked_for_changes_nothing() {
         let anchor = SettledAnchor::new();
         assert_eq!(anchor.resolve_header(&l2_header()), Resolve::NotPending);
-        anchor.note_settled_hash(1, [0x22; 32]);
+        anchor.note_settled_hash(at(1, [0x22; 32]));
         assert_eq!(anchor.resolve_header(&l2_header()), Resolve::NotPending);
         assert_eq!(anchor.pending_hash(), Some([0x22; 32]));
         assert_eq!(anchor.settled(), None);
@@ -508,24 +656,80 @@ mod tests {
     fn an_older_l1_read_is_ignored() {
         let v = vector();
         let anchor = SettledAnchor::new();
-        anchor.note_settled_hash(10, v.l2_block_hash);
-        anchor.note_settled_hash(9, [0x33; 32]);
+        anchor.note_settled_hash(at(10, v.l2_block_hash));
+        assert_eq!(anchor.note_settled_hash(at(9, [0x33; 32])), Note::Ignored);
         assert_eq!(anchor.pending_hash(), Some(v.l2_block_hash));
         assert_eq!(anchor.resolve_header(&l2_header()), Resolve::Adopted);
-        // At or below the settled block's slot, another hash is ignored too.
-        anchor.note_settled_hash(10, [0x44; 32]);
-        assert_eq!(anchor.pending_hash(), None);
+        assert_eq!(anchor.note_settled_hash(at(9, [0x44; 32])), Note::Ignored);
+        assert_eq!(
+            anchor.note_settled_hash(at(9, v.l2_block_hash)),
+            Note::Ignored
+        );
+        assert_eq!(anchor.settled().unwrap().l1_slot, 10);
+        assert_eq!(anchor.alarm(), None);
     }
 
     #[test]
     fn the_settled_hash_again_moves_its_slot_forward() {
         let v = vector();
         let anchor = SettledAnchor::new();
-        anchor.note_settled_hash(10, v.l2_block_hash);
+        anchor.note_settled_hash(at(10, v.l2_block_hash));
         anchor.resolve_header(&l2_header());
-        anchor.note_settled_hash(25, v.l2_block_hash);
+        assert_eq!(
+            anchor.note_settled_hash(at(25, v.l2_block_hash)),
+            Note::Refreshed
+        );
         assert_eq!(anchor.settled().unwrap().l1_slot, 25);
         assert_eq!(anchor.pending_hash(), None);
+        assert_eq!(anchor.alarm(), None);
+    }
+
+    #[test]
+    fn two_hashes_for_one_slot_raise_a_conflict() {
+        let anchor = SettledAnchor::new();
+        assert_eq!(anchor.note_settled_hash(at(100, [0xaa; 32])), Note::Pending);
+        assert_eq!(anchor.note_settled_hash(at(100, [0xbb; 32])), Note::Alarmed);
+        assert_eq!(anchor.pending_hash(), Some([0xaa; 32]));
+        assert_eq!(
+            anchor.alarm(),
+            Some(Alarm::Conflict {
+                l1_slot: 100,
+                first: [0xaa; 32],
+                second: [0xbb; 32]
+            })
+        );
+        // Against the settled block's own slot too.
+        let v = vector();
+        let anchor = SettledAnchor::new();
+        anchor.note_settled_hash(at(10, v.l2_block_hash));
+        anchor.resolve_header(&l2_header());
+        assert_eq!(anchor.note_settled_hash(at(10, [0xcc; 32])), Note::Alarmed);
+        assert!(matches!(
+            anchor.alarm(),
+            Some(Alarm::Conflict { l1_slot: 10, .. })
+        ));
+    }
+
+    #[test]
+    fn the_settled_hash_after_a_newer_one_raises_moved_back() {
+        let v = vector();
+        let anchor = SettledAnchor::new();
+        anchor.note_settled_hash(at(10, v.l2_block_hash));
+        anchor.resolve_header(&l2_header());
+        assert_eq!(anchor.note_settled_hash(at(11, [0xdd; 32])), Note::Pending);
+        assert_eq!(
+            anchor.note_settled_hash(at(12, v.l2_block_hash)),
+            Note::Alarmed
+        );
+        assert_eq!(anchor.pending_hash(), None);
+        assert_eq!(
+            anchor.alarm(),
+            Some(Alarm::MovedBack {
+                l1_slot: 12,
+                settled: v.l2_block_hash,
+                dropped: [0xdd; 32]
+            })
+        );
     }
 
     #[test]
@@ -533,7 +737,7 @@ mod tests {
         let v = vector();
         let anchor = SettledAnchor::new();
         settled_at(&anchor, 10, v.l2_block_number + 5, [0x55; 32]);
-        anchor.note_settled_hash(11, v.l2_block_hash);
+        anchor.note_settled_hash(at(11, v.l2_block_hash));
         assert_eq!(
             anchor.resolve_header(&l2_header()),
             Resolve::Regressed {
@@ -543,6 +747,14 @@ mod tests {
         );
         assert_eq!(anchor.settled().unwrap().hash, [0x55; 32]);
         assert_eq!(anchor.pending_hash(), None);
+        assert_eq!(
+            anchor.alarm(),
+            Some(Alarm::Regressed {
+                l1_slot: 11,
+                settled: v.l2_block_number + 5,
+                offered: v.l2_block_number
+            })
+        );
     }
 
     #[test]
@@ -550,7 +762,7 @@ mod tests {
         let v = vector();
         let anchor = SettledAnchor::new();
         settled_at(&anchor, 10, v.l2_block_number, [0x66; 32]);
-        anchor.note_settled_hash(11, v.l2_block_hash);
+        anchor.note_settled_hash(at(11, v.l2_block_hash));
         assert_eq!(
             anchor.resolve_header(&l2_header()),
             Resolve::Regressed {
@@ -559,6 +771,23 @@ mod tests {
             }
         );
         assert_eq!(anchor.settled().unwrap().hash, [0x66; 32]);
+        assert!(anchor.alarm().is_some());
+    }
+
+    #[test]
+    fn the_first_alarm_is_kept() {
+        let anchor = SettledAnchor::new();
+        anchor.note_settled_hash(at(100, [0xaa; 32]));
+        anchor.note_settled_hash(at(100, [0xbb; 32]));
+        anchor.note_settled_hash(at(100, [0xcc; 32]));
+        assert_eq!(
+            anchor.alarm(),
+            Some(Alarm::Conflict {
+                l1_slot: 100,
+                first: [0xaa; 32],
+                second: [0xbb; 32]
+            })
+        );
     }
 
     #[test]
@@ -566,9 +795,61 @@ mod tests {
         let v = vector();
         let anchor = SettledAnchor::new();
         settled_at(&anchor, 10, v.l2_block_number - 900, [0x77; 32]);
-        anchor.note_settled_hash(11, v.l2_block_hash);
+        assert_eq!(
+            anchor.note_settled_hash(at(11, v.l2_block_hash)),
+            Note::Pending
+        );
         assert_eq!(anchor.resolve_header(&l2_header()), Resolve::Adopted);
         assert_eq!(anchor.settled().unwrap().number, v.l2_block_number);
         assert_eq!(anchor.settled().unwrap().l1_slot, 11);
+        assert_eq!(anchor.alarm(), None);
+    }
+
+    /// The dev-only gate (owner's decision, 2026-11-26; docs/ideas/gnosis-eez.md
+    /// §4): no Rust source in the workspace outside this file, `tests/` and
+    /// `examples/` refers to this module, so nothing reaches `config_for`, the
+    /// catalogue, UniFFI, the C ABI or `myotis-rpcd` through it. The hosts
+    /// (Kotlin, Java, Swift) can only reach Rust through the engine's FFI,
+    /// which this scan covers. Widening the gate is the owner's call.
+    #[test]
+    fn dev_only_gate_no_shipped_code_refers_to_this_module() {
+        let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap();
+        let this = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/el/eez.rs");
+        let needles = [
+            "el::eez",
+            "super::eez",
+            "eez::{",
+            "SettledAnchor",
+            "settled_l2_hash",
+            "SettledHash",
+        ];
+        let mut offenders = Vec::new();
+        let mut stack = vec![workspace.to_path_buf()];
+        while let Some(dir) = stack.pop() {
+            for entry in std::fs::read_dir(&dir).unwrap().flatten() {
+                let path = entry.path();
+                let name = entry.file_name().to_string_lossy().into_owned();
+                if path.is_dir() {
+                    if !["target", "vendor", "testdata", "examples", "tests", ".git"]
+                        .contains(&name.as_str())
+                    {
+                        stack.push(path);
+                    }
+                } else if name.ends_with(".rs") && path != this {
+                    let text = std::fs::read_to_string(&path).unwrap_or_default();
+                    for needle in needles {
+                        if text.contains(needle) {
+                            offenders.push(format!("{} ({needle})", path.display()));
+                        }
+                    }
+                }
+            }
+        }
+        assert!(
+            offenders.is_empty(),
+            "the dev-only EEZ anchor is referred to from shipped code: {offenders:?}"
+        );
     }
 }
