@@ -57,7 +57,8 @@ struct Args {
     /// installed once the engine's EL reader is up.
     #[arg(long, value_name = "FILE")]
     log_index_config: Option<PathBuf>,
-    /// The address history's settings (engine JSON: {"importer":"0x…","swarm":{…}}, see
+    /// The address history's settings (engine JSON: {"importer":"0x…","swarm":{…}}, or
+    /// {"importers":{"<chain id>":"0x…",…},"swarm":{…}} for a key per chain; see
     /// myotis_getAddressHistory), applied at start: the importer key (EXPERIMENTAL: the list's
     /// completeness rests on that importer) and the Swarm network.
     /// A refused config stops the start. Needs an engine built with its `swarm` feature.
@@ -167,6 +168,31 @@ fn main() {
     }
 }
 
+/// Whose index the address history settings `json` trust, one line per chain (`"importers"`)
+/// or one for every chain (`"importer"`). Read after the engine applied them, so the shape is
+/// the engine's.
+fn trusted_importers(json: &str) -> Vec<String> {
+    let v = serde_json::from_str::<serde_json::Value>(json).unwrap_or_default();
+    if let Some(map) = v.get("importers").and_then(|m| m.as_object()) {
+        if map.is_empty() {
+            return vec!["trusting no importer (every read refused)".to_string()];
+        }
+        let mut chains: Vec<(u64, &str)> = map
+            .iter()
+            .filter_map(|(chain, key)| Some((chain.parse().ok()?, key.as_str()?)))
+            .collect();
+        chains.sort_unstable();
+        return chains
+            .into_iter()
+            .map(|(chain, key)| format!("trusting on chain {chain} the index of importer {key}"))
+            .collect();
+    }
+    match v.get("importer").and_then(|i| i.as_str()) {
+        Some(key) => vec![format!("trusting on every chain the index of importer {key}")],
+        None => vec!["trusting no importer (every read refused)".to_string()],
+    }
+}
+
 fn run(args: Args) -> Result<(), String> {
     // ABI handshake (also installs the engine's log ring). The engine is linked
     // statically, so a mismatch means a broken build, not a stale library.
@@ -179,18 +205,15 @@ fn run(args: Args) -> Result<(), String> {
     }
     if let Some(p) = &args.address_history_config {
         let s = std::fs::read_to_string(p).map_err(|e| format!("{}: {e}", p.display()))?;
-        let importer = serde_json::from_str::<serde_json::Value>(&s)
-            .ok()
-            .and_then(|v| v.get("importer").and_then(|i| i.as_str()).map(str::to_owned));
+        let trusted = trusted_importers(&s);
         let answer = ffi::set_address_history_config_json(s);
         if answer.trim() != "{}" {
             return Err(format!("{}: the address history settings were refused: {answer}", p.display()));
         }
         // The setting is experimental and rests on trust: say whose index it trusts.
-        eprintln!(
-            "address history: experimental, trusting the index of importer {} for its completeness",
-            importer.as_deref().unwrap_or("(none: every read refused)")
-        );
+        for line in trusted {
+            eprintln!("address history: experimental, {line} for its completeness");
+        }
     }
     // EIP-1459 DNS discovery (#539): this daemon resolves through the system
     // resolver, as the JVM daemon does, so the EL pool may walk the network's
@@ -598,6 +621,19 @@ mod tests {
             "--discv4-port", "30305", "--discv5-port", "9005", "--libp2p-port", "9105", "--libp2p-quic-port", "9106",
         ]);
         assert_eq!(all.listen_ports(), Some([30305, 9005, 9105, 9106]));
+    }
+
+    #[test]
+    fn the_start_names_every_chains_importer() {
+        let a = "0xb11B5F07FEb04076c21092A64eb827f418087241";
+        let b = "0xE7795B93916b361F1aF8610A16ef8E1190319335";
+        assert_eq!(
+            trusted_importers(&format!(r#"{{"importers":{{"100":"{b}","1":"{a}"}}}}"#)),
+            [format!("trusting on chain 1 the index of importer {a}"), format!("trusting on chain 100 the index of importer {b}")]
+        );
+        assert_eq!(trusted_importers(&format!(r#"{{"importer":"{a}"}}"#)), [format!("trusting on every chain the index of importer {a}")]);
+        assert_eq!(trusted_importers(r#"{"importer":null}"#), ["trusting no importer (every read refused)"]);
+        assert_eq!(trusted_importers(r#"{"importers":{}}"#), ["trusting no importer (every read refused)"]);
     }
 
     #[test]

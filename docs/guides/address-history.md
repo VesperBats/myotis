@@ -27,8 +27,9 @@ The rule this rests on is the carve-out for Swarm reads of the address index in
   (up to 50,000, dropped on a restart, a re-anchor or the table's alarm), and later pages show
   it.
 - **What stays on the importer's word.** The list's *completeness* (an entry left out) and its
-  `TRACE` entries. The answer names the importer key it rests on, and every block range the
-  index does not cover (`headGap`, `tailGap`, `gaps`), never a shorter list.
+  `TRACE` entries. The answer names the importer key it rests on (the one set for its chain),
+  and every block range the index does not cover (`headGap`, `tailGap`, `gaps`), never a
+  shorter list.
 
 ## Building with the reader
 
@@ -80,9 +81,27 @@ One JSON object, applied whole or refused:
 }
 ```
 
-- **`importer`**: the key the index is signed with. An *experimental* setting: you trust that
-  importer for the list's completeness. `null` refuses every read. The daemon and `myotis-rpcd`
-  log at start which importer they trust.
+- **`importer`**: the key the index is signed with, one key for every chain. An *experimental*
+  setting: you trust that importer for the list's completeness. `null` refuses every read.
+- **`importers`**, in place of `importer` (ABI 62): a key per chain, keyed by the decimal chain
+  id, so one engine reads each chain's index under its own importer:
+
+  ```json
+  {
+    "importers": {
+      "1": "0xb11B5F07FEb04076c21092A64eb827f418087241",
+      "100": "0xE7795B93916b361F1aF8610A16ef8E1190319335"
+    },
+    "swarm": { "network": "mainnet" }
+  }
+  ```
+
+  A read on a chain the map does not name is refused (`-32602`), as every read is with
+  `"importer": null`; `{}` names no chain. Both `importer` and `importers` at once are refused,
+  and so is a chain id that is not a plain decimal (no sign, no leading zero, not `0`), an
+  invalid key, or a chain id given twice.
+- The daemon and `myotis-rpcd` log at start which importer they trust, on every chain or on
+  each chain the map names.
 - **`swarm`**: `{"network": "mainnet"}` (Swarm mainnet's bootnodes, the default), or for a
   local network `{"network": "dev", "networkId": <id>, "bootnodes": ["<multiaddr>", …]}`.
 

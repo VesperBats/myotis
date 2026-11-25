@@ -306,7 +306,8 @@ public final class Main {
 
     /**
      * -Dmyotis.addressHistory.config=&lt;file&gt; (Gradle: -PaddressHistoryConfig): the address
-     * history's settings (#899; the importer key and the Swarm network), applied once, in
+     * history's settings (#899; the importer key, one for every chain or one per chain, and the
+     * Swarm network), applied once, in
      * daemon mode only. A refusal or an unreadable file stops the daemon with a message,
      * never a daemon running with the setting silently unapplied.
      */
@@ -327,11 +328,35 @@ public final class Main {
             System.err.println("-Dmyotis.addressHistory.config: the settings in " + file + " were refused: " + answer);
             System.exit(2);
         }
-        // The setting is experimental and rests on trust: say whose index it trusts.
-        java.util.regex.Matcher m = java.util.regex.Pattern
-                .compile("\"importer\"\\s*:\\s*\"(0x[0-9a-fA-F]{40})\"").matcher(json);
-        System.err.println("address history: experimental, trusting the index of importer "
-                + (m.find() ? m.group(1) : "(none: every read refused)") + " for its completeness");
+        // The setting is experimental and rests on trust: say whose index it trusts, per chain.
+        for (String line : trustedImporters(json)) {
+            System.err.println("address history: experimental, " + line + " for its completeness");
+        }
+    }
+
+    /**
+     * Whose index the address history settings {@code json} trust: one line per chain
+     * ({@code "importers"}) or one for every chain ({@code "importer"}). Read after the engine
+     * applied them, so the shape is the engine's (chain ids are decimal, keys 20-byte hex).
+     */
+    static List<String> trustedImporters(String json) {
+        List<String> lines = new ArrayList<>();
+        java.util.regex.Matcher map = java.util.regex.Pattern
+                .compile("\"importers\"\\s*:\\s*\\{([^}]*)}").matcher(json);
+        if (map.find()) {
+            java.util.TreeMap<java.math.BigInteger, String> chains = new java.util.TreeMap<>();
+            java.util.regex.Matcher e = java.util.regex.Pattern
+                    .compile("\"([0-9]+)\"\\s*:\\s*\"(0[xX][0-9a-fA-F]{40})\"").matcher(map.group(1));
+            while (e.find()) chains.put(new java.math.BigInteger(e.group(1)), e.group(2));
+            chains.forEach((chain, key) ->
+                    lines.add("trusting on chain " + chain + " the index of importer " + key));
+        } else {
+            java.util.regex.Matcher m = java.util.regex.Pattern
+                    .compile("\"importer\"\\s*:\\s*\"(0[xX][0-9a-fA-F]{40})\"").matcher(json);
+            if (m.find()) lines.add("trusting on every chain the index of importer " + m.group(1));
+        }
+        if (lines.isEmpty()) lines.add("trusting no importer (every read refused)");
+        return lines;
     }
 
     private static void runDaemon(MyotisEngine engine, List<String> networks, int portOverride)

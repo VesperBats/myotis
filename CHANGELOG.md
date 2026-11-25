@@ -19,6 +19,21 @@ its trust anchors and release checks.
 
 ## [Unreleased]
 
+### Added
+
+- Address history: the settings take an importer key per chain,
+  `"importers": {"1": "0x…", "100": "0x…"}` keyed by the decimal chain id, so
+  one engine reads Ethereum's and Gnosis Chain's addr1 indexes, each under its
+  own importer. A read on a chain the map does not name is refused with
+  `-32602`, for that chain only. `"importer"` (one key for every chain) is
+  unchanged; both at once are refused, and so is a malformed chain id or key,
+  or a chain id or setting given twice. The daemon and `myotis-rpcd` log at
+  start the importer they trust on each chain.
+
+### Changed
+
+- Engine ABI 62 (0.1.24 shipped 61): the per-chain importer keys.
+
 ## [0.1.24] - 2026-11-25
 
 ### Added

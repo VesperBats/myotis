@@ -9,7 +9,8 @@
 //! **Refused with the permanent `-32602`, never an empty list** (the carve-out):
 //! - a build without the reader (no `swarm` feature), and iOS (Android reads it: owner's
 //!   decision, 2026-11-24);
-//! - without an importer key (an experimental setting: the user trusts that importer);
+//! - without an importer key for the chain read (an experimental setting: the user trusts
+//!   that importer; one key for every chain, or one per chain);
 //! - while Tor routing is on (the embedded node does not route through Tor).
 //!
 //! The settings are engine-wide ([`set_config_json`]); the node starts on the first read, is
@@ -42,11 +43,43 @@ fn tor_on() -> bool {
     }
 }
 
+/// Whose index is read, per chain.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum Importers {
+    /// No key (`"importer": null`, or neither field): every read is refused.
+    #[default]
+    None,
+    /// `"importer"`: one key for every chain.
+    All([u8; 20]),
+    /// `"importers"`: a key per chain id; a read on a chain not in it is refused.
+    PerChain(std::collections::BTreeMap<u64, [u8; 20]>),
+}
+
+impl Importers {
+    /// The importer whose index is read on `chain_id`, if any.
+    pub fn for_chain(&self, chain_id: u64) -> Option<[u8; 20]> {
+        match self {
+            Importers::None => None,
+            Importers::All(key) => Some(*key),
+            Importers::PerChain(keys) => keys.get(&chain_id).copied(),
+        }
+    }
+
+    /// Whether no chain may be read at all.
+    pub fn is_empty(&self) -> bool {
+        match self {
+            Importers::None => true,
+            Importers::All(_) => false,
+            Importers::PerChain(keys) => keys.is_empty(),
+        }
+    }
+}
+
 /// The settings, as the host sets them.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Config {
-    /// The importer whose index is read: `None` refuses every read.
-    pub importer: Option<[u8; 20]>,
+    /// The importer whose index is read, per chain: [`Importers::None`] refuses every read.
+    pub importers: Importers,
     /// The Swarm network the reader joins.
     pub network: Network,
 }
@@ -60,21 +93,43 @@ pub enum Network {
     Dev { network_id: u64, bootnodes: Vec<String> },
 }
 
-/// Parse `{"importer": "0x…" | null, "swarm": {"network": "mainnet"} | {"network": "dev",
-/// "networkId": N, "bootnodes": ["/ip4/…", …]}}`. Every field is applied or the whole
-/// request refused; unknown fields are refused too.
+/// Parse `{"importer": "0x…" | null, "importers": {"<chain id>": "0x…", …},
+/// "swarm": {"network": "mainnet"} | {"network": "dev", "networkId": N, "bootnodes": ["/ip4/…", …]}}`.
+/// `importer` is one key for every chain, `importers` one per chain (decimal chain ids); at
+/// most one of the two. Every field is applied or the whole request refused; unknown fields
+/// and a key given twice are refused too.
 pub fn parse_config(json: &str) -> Result<Config, String> {
     let v: serde_json::Value = serde_json::from_str(json).map_err(|e| format!("invalid settings JSON: {e}"))?;
     let obj = v.as_object().ok_or("settings must be a JSON object")?;
     for k in obj.keys() {
-        if k != "importer" && k != "swarm" {
+        if !matches!(k.as_str(), "importer" | "importers" | "swarm") {
             return Err(format!("unknown setting '{k}'"));
         }
     }
-    let importer = match obj.get("importer") {
-        None | Some(serde_json::Value::Null) => None,
-        Some(serde_json::Value::String(s)) => Some(parse_address(s).ok_or("invalid importer (expected a 20-byte 0x address)")?),
-        Some(_) => return Err("invalid importer (expected a 20-byte 0x address or null)".into()),
+    if obj.contains_key("importer") && obj.contains_key("importers") {
+        return Err("give either 'importer' (one key for every chain) or 'importers' (a key per chain), not both".into());
+    }
+    let importers = match (obj.get("importer"), obj.get("importers")) {
+        (None | Some(serde_json::Value::Null), None) => Importers::None,
+        (Some(serde_json::Value::String(s)), None) => {
+            Importers::All(parse_address(s).ok_or("invalid importer (expected a 20-byte 0x address)")?)
+        }
+        (Some(_), None) => return Err("invalid importer (expected a 20-byte 0x address or null)".into()),
+        (None, Some(serde_json::Value::Object(m))) => {
+            let mut keys = std::collections::BTreeMap::new();
+            for (chain, key) in m {
+                let chain_id = parse_chain_id(chain)
+                    .ok_or_else(|| format!("invalid chain id '{chain}' in importers (expected a decimal chain id)"))?;
+                let key = key
+                    .as_str()
+                    .and_then(parse_address)
+                    .ok_or_else(|| format!("invalid importer for chain {chain_id} (expected a 20-byte 0x address)"))?;
+                keys.insert(chain_id, key);
+            }
+            Importers::PerChain(keys)
+        }
+        (None, Some(_)) => return Err("importers must be an object of chain id to importer address".into()),
+        (Some(_), Some(_)) => unreachable!("refused above"),
     };
     let network = match obj.get("swarm") {
         None | Some(serde_json::Value::Null) => Network::Mainnet,
@@ -119,7 +174,54 @@ pub fn parse_config(json: &str) -> Result<Config, String> {
         }
         Some(_) => return Err("swarm must be an object".into()),
     };
-    Ok(Config { importer, network })
+    // serde_json keeps the last of two equal keys without a word: refuse a key given twice,
+    // at the top, in `importers` and in `swarm` (the checks above have seen the types).
+    serde_json::from_str::<NoDuplicates>(json).map_err(|e| format!("invalid settings JSON: {e}"))?;
+    Ok(Config { importers, network })
+}
+
+/// The settings' fields, read only to refuse one given twice (serde's derive refuses a
+/// duplicate field; [`UniqueKeys`] a duplicate chain id or swarm setting).
+#[derive(serde::Deserialize)]
+#[allow(dead_code)]
+struct NoDuplicates {
+    importer: Option<serde::de::IgnoredAny>,
+    importers: Option<UniqueKeys>,
+    swarm: Option<UniqueKeys>,
+}
+
+/// An object whose keys are all distinct.
+struct UniqueKeys;
+
+impl<'de> serde::Deserialize<'de> for UniqueKeys {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        struct V;
+        impl<'de> serde::de::Visitor<'de> for V {
+            type Value = UniqueKeys;
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("an object")
+            }
+            fn visit_map<A: serde::de::MapAccess<'de>>(self, mut map: A) -> Result<UniqueKeys, A::Error> {
+                let mut seen = std::collections::BTreeSet::new();
+                while let Some(k) = map.next_key::<String>()? {
+                    if !seen.insert(k.clone()) {
+                        return Err(serde::de::Error::custom(format!("'{k}' given twice")));
+                    }
+                    map.next_value::<serde::de::IgnoredAny>()?;
+                }
+                Ok(UniqueKeys)
+            }
+        }
+        d.deserialize_map(V)
+    }
+}
+
+/// A chain id as `importers` keys it: decimal digits, no sign, no leading zero, not 0, a u64.
+fn parse_chain_id(s: &str) -> Option<u64> {
+    if s.is_empty() || !s.bytes().all(|b| b.is_ascii_digit()) || s.starts_with('0') {
+        return None;
+    }
+    s.parse().ok()
 }
 
 fn parse_address(s: &str) -> Option<[u8; 20]> {
@@ -176,8 +278,8 @@ pub fn set_config_json(json: &str) -> String {
             let Ok(mut c) = CONFIG.lock() else {
                 return eljson::error_json("address history settings lock poisoned");
             };
-            // No importer: nothing may be read, so no node keeps running for it.
-            if cfg.importer.is_none() {
+            // No importer for any chain: nothing may be read, so no node keeps running for it.
+            if cfg.importers.is_empty() {
                 reader::stop();
             }
             *c = Some(cfg);
@@ -210,13 +312,21 @@ pub fn tor_switched_on() {
     reader::stop();
 }
 
-/// The refusal a read gets before any I/O, if any.
-fn refusal(cfg: &Config) -> Option<String> {
+/// The refusal a read on `chain_id` gets before any I/O, if any.
+fn refusal(cfg: &Config, chain_id: u64) -> Option<String> {
     if let Some(why) = build_refusal() {
         return Some(why.to_string());
     }
-    if cfg.importer.is_none() {
-        return Some("no importer key is set for the address history (an experimental setting)".to_string());
+    match &cfg.importers {
+        Importers::None => {
+            return Some("no importer key is set for the address history (an experimental setting)".to_string());
+        }
+        Importers::PerChain(_) if cfg.importers.for_chain(chain_id).is_none() => {
+            return Some(format!(
+                "no importer key is set for the address history on chain {chain_id} (an experimental setting)"
+            ));
+        }
+        _ => {}
     }
     if tor_on() {
         reader::stop();
@@ -229,8 +339,9 @@ fn refusal(cfg: &Config) -> Option<String> {
 }
 
 /// `address_history_json`: one page of `address`'s history on chain `chain_id`, newest
-/// first. `options_json` (`{"cursor","limit","roles","fromBlock","toBlock"}`, each optional,
-/// each applied: [`parse_options`]) picks the page; `chain_head` is the node's verified head
+/// first, from the index of that chain's importer. `options_json`
+/// (`{"cursor","limit","roles","fromBlock","toBlock"}`, each optional, each applied:
+/// [`parse_options`]) picks the page; `chain_head` is the node's verified head
 /// (for the head gap); `trust` decides whether kept verdicts may show. The answer:
 ///
 /// ```json
@@ -256,7 +367,7 @@ pub fn history_json(
     options_json: &str,
 ) -> String {
     let cfg = config();
-    if let Some(why) = refusal(&cfg) {
+    if let Some(why) = refusal(&cfg, chain_id) {
         return eljson::invalid_params_json(&why);
     }
     let Some(address) = parse_address(address) else {
@@ -266,7 +377,7 @@ pub fn history_json(
         Ok(o) => o,
         Err(msg) => return eljson::invalid_params_json(&msg),
     };
-    let importer = cfg.importer.expect("refusal() checked it");
+    let importer = cfg.importers.for_chain(chain_id).expect("refusal() checked it");
     match reader::page(rt, &cfg, chain_id, importer, &address, &opts) {
         Ok(read) => page_json(&read, importer, chain_head, (chain_id, address), trust, &opts),
         Err(reader::Failure::Refused(msg)) => eljson::invalid_params_json(&msg),
@@ -1077,7 +1188,10 @@ mod tests {
     #[test]
     fn settings_are_applied_or_refused_whole() {
         let ok = parse_config(r#"{"importer":"0x1111111111111111111111111111111111111111","swarm":{"network":"dev","networkId":7,"bootnodes":["/ip4/192.0.2.1/tcp/1634"]}}"#).unwrap();
-        assert_eq!(ok.importer, Some([0x11; 20]));
+        assert_eq!(ok.importers, Importers::All([0x11; 20]));
+        // The one key reads every chain, as before the per-chain map.
+        assert_eq!(ok.importers.for_chain(1), Some([0x11; 20]));
+        assert_eq!(ok.importers.for_chain(100), Some([0x11; 20]));
         assert!(matches!(ok.network, Network::Dev { network_id: 7, .. }));
         assert_eq!(parse_config("{}").unwrap(), Config::default());
         assert_eq!(parse_config(r#"{"importer":null,"swarm":{"network":"mainnet"}}"#).unwrap(), Config::default());
@@ -1102,6 +1216,87 @@ mod tests {
         for dns in ["/dns4/bee.local/tcp/1634", "/dnsaddr/mainnet.ethswarm.org"] {
             let bad = format!(r#"{{"swarm":{{"network":"dev","networkId":7,"bootnodes":["{dns}"]}}}}"#);
             assert!(parse_config(&bad).unwrap_err().contains("DNS"), "{dns}");
+        }
+    }
+
+    #[test]
+    fn importers_are_applied_per_chain() {
+        let ok = parse_config(
+            r#"{"importers":{"1":"0xb11B5F07FEb04076c21092A64eb827f418087241","100":"0xE7795B93916b361F1aF8610A16ef8E1190319335"},"swarm":{"network":"mainnet"}}"#,
+        )
+        .unwrap();
+        let mainnet = parse_address("0xb11B5F07FEb04076c21092A64eb827f418087241").unwrap();
+        let gnosis = parse_address("0xE7795B93916b361F1aF8610A16ef8E1190319335").unwrap();
+        assert_eq!(ok.importers.for_chain(1), Some(mainnet));
+        assert_eq!(ok.importers.for_chain(100), Some(gnosis));
+        // A chain the map does not name has no importer: its reads are refused, the others' not.
+        assert_eq!(ok.importers.for_chain(11_155_111), None);
+        assert!(!ok.importers.is_empty());
+        assert_eq!(ok.network, Network::Mainnet);
+        // An empty map names no chain: like "importer": null, every read is refused.
+        let empty = parse_config(r#"{"importers":{}}"#).unwrap();
+        assert!(empty.importers.is_empty());
+        assert_eq!(empty.importers.for_chain(1), None);
+        // The largest u64 is a chain id like any other.
+        let max = parse_config(r#"{"importers":{"18446744073709551615":"0x1111111111111111111111111111111111111111"}}"#).unwrap();
+        assert_eq!(max.importers.for_chain(u64::MAX), Some([0x11; 20]));
+    }
+
+    #[test]
+    fn importers_are_refused_whole_when_malformed_or_given_with_importer() {
+        let key = "0x1111111111111111111111111111111111111111";
+        for bad in [
+            // Both forms at once, whatever their values: refused, never one of them ignored.
+            format!(r#"{{"importer":"{key}","importers":{{"1":"{key}"}}}}"#),
+            format!(r#"{{"importer":null,"importers":{{"1":"{key}"}}}}"#),
+            format!(r#"{{"importer":"{key}","importers":{{}}}}"#),
+            // Malformed chain ids.
+            format!(r#"{{"importers":{{"0":"{key}"}}}}"#),
+            format!(r#"{{"importers":{{"01":"{key}"}}}}"#),
+            format!(r#"{{"importers":{{"+1":"{key}"}}}}"#),
+            format!(r#"{{"importers":{{"-1":"{key}"}}}}"#),
+            format!(r#"{{"importers":{{"0x64":"{key}"}}}}"#),
+            format!(r#"{{"importers":{{" 1":"{key}"}}}}"#),
+            format!(r#"{{"importers":{{"":"{key}"}}}}"#),
+            format!(r#"{{"importers":{{"gnosis":"{key}"}}}}"#),
+            format!(r#"{{"importers":{{"18446744073709551616":"{key}"}}}}"#),
+            // Malformed keys.
+            r#"{"importers":{"1":"0x12"}}"#.to_string(),
+            r#"{"importers":{"1":null}}"#.to_string(),
+            r#"{"importers":{"1":5}}"#.to_string(),
+            format!(r#"{{"importers":{{"1":"{key}","100":"0x{}"}}}}"#, "+f".repeat(20)),
+            // Not a map.
+            r#"{"importers":null}"#.to_string(),
+            format!(r#"{{"importers":"{key}"}}"#),
+            format!(r#"{{"importers":[["1","{key}"]]}}"#),
+            // A chain, or a setting, given twice: the last one would win silently.
+            format!(r#"{{"importers":{{"1":"{key}","1":"0x2222222222222222222222222222222222222222"}}}}"#),
+            format!(r#"{{"importers":{{"1":"{key}"}},"importers":{{"100":"{key}"}}}}"#),
+            format!(r#"{{"importer":"0x2222222222222222222222222222222222222222","importer":"{key}"}}"#),
+            r#"{"swarm":{"network":"dev","networkId":8,"bootnodes":["/ip4/192.0.2.1/tcp/1634"],"networkId":7}}"#
+                .to_string(),
+        ] {
+            assert!(parse_config(&bad).is_err(), "{bad}");
+            let v: serde_json::Value = serde_json::from_str(&set_config_json(&bad)).unwrap();
+            assert_eq!(v["code"], eljson::INVALID_PARAMS, "{bad}");
+        }
+        assert!(parse_config(&format!(r#"{{"importer":"{key}","importers":{{"1":"{key}"}}}}"#))
+            .unwrap_err()
+            .contains("not both"));
+    }
+
+    #[test]
+    fn a_read_on_a_chain_without_its_importer_is_refused_permanently() {
+        let cfg = parse_config(r#"{"importers":{"1":"0x1111111111111111111111111111111111111111"}}"#).unwrap();
+        let gnosis = refusal(&cfg, 100).expect("refused");
+        let mainnet = refusal(&cfg, 1);
+        if build_refusal().is_none() && !tor_on() {
+            assert!(gnosis.contains("chain 100"), "{gnosis}");
+            assert_eq!(mainnet, None);
+        }
+        let all = parse_config(r#"{"importer":"0x1111111111111111111111111111111111111111"}"#).unwrap();
+        if build_refusal().is_none() && !tor_on() {
+            assert_eq!(refusal(&all, 100), None);
         }
     }
 
@@ -1325,7 +1520,7 @@ mod tests {
     fn a_read_without_an_importer_or_bad_arguments_is_refused_permanently() {
         let code = |json: String| serde_json::from_str::<serde_json::Value>(&json).unwrap()["code"].clone();
         // Without an importer (or without the reader in this build): -32602, never [].
-        let none = refusal(&Config::default()).expect("refused");
+        let none = refusal(&Config::default(), 1).expect("refused");
         assert!(none.contains("importer") || none.contains("Swarm reader") || none.contains("iOS"), "{none}");
         // The arguments are checked once the reader may run; with the default settings the
         // refusal comes first, so check the shapes through parse_cursor/limit rules here.

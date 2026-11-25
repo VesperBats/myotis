@@ -1,5 +1,5 @@
 // Command myotis-capi is the Go engine as a c-shared library: the C ABI
-// of rust/include/myotis_engine.h (ABI 61), implemented over
+// of rust/include/myotis_engine.h (ABI 62), implemented over
 // internal/capi for JVM JNA consumers (desktop-embed step 1, part 1b).
 //
 // Every symbol the header declares is exported — functional for the

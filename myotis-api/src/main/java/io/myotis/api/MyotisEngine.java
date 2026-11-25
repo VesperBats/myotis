@@ -69,6 +69,15 @@ public interface MyotisEngine {
      * the user trusts that importer for the list's completeness. Applied whole ({@code "{}"})
      * or refused with the permanent {@code {"error","code":-32602}}. Default: refused, no
      * address history on this engine.
+     *
+     * <p>{@code "importer"} is one key for every chain. In its place, {@code "importers"} gives a
+     * key per chain, keyed by the decimal chain id (ABI 62), for example
+     * {@code {"importers": {"1": "0x…", "100": "0x…"}, "swarm": {"network": "mainnet"}}}: each
+     * chain's history is read from the index its own importer signed, and a read on a chain the
+     * map does not name is refused ({@code -32602}), as every read is with
+     * {@code "importer": null}. Both fields at once, a chain id that is not a canonical decimal
+     * (no sign, no leading zero, not 0), an invalid key, or a chain id given twice: the whole
+     * settings are refused.
      */
     default String setAddressHistoryConfigJson(String configJson) {
         return VerifiedReads.ADDRESS_HISTORY_REFUSED;
