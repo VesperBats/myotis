@@ -16,15 +16,17 @@ live Ethereum-backed RollupX network), and proposes a setup to develop against
 before the Gnosis zone exists.
 
 **Short answer:** after the fork, Gnosis has no sync committee, so the Gnosis
-beacon light client stops being a source of truth at the fork. The anchor that
-fits the trust model is the one [the Base evaluation](base-l2-evaluation.md)
-arrives at for Base: the L2 block hash that the rollup's contract on mainnet
-holds, read through Myotis's own verified mainnet state. On EEZ that is one
-storage slot, it is already a block hash, and Myotis's Gloas-era
-`ExecAnchor` already takes a block hash first and its header after. The hard
-parts are elsewhere: the anchored block is 0.5–2 hours old, the state that old
-is near the edge of what peers serve, and EEZ adds transaction types and EVM
-rules.
+beacon light client stops being a source of truth at the fork. The candidate
+anchor is the one [the Base evaluation](base-l2-evaluation.md) arrives at for
+Base: the L2 block hash that the rollup's contract on mainnet holds, read
+through Myotis's own verified mainnet state. On EEZ that is one storage slot,
+it is already a block hash, and Myotis's Gloas-era `ExecAnchor` already takes a
+block hash first and its header after. Two things have to be kept apart: the
+READ is verified end to end (sync committee → mainnet state root → storage
+proof → keccak of the L2 header), but the VALUE is only as good as the
+registry's acceptance rule, which is outside today's trust rule (§2, §4). On
+top of that, the anchored block was 55 min and about 2 h old in the two samples taken, the state that old is near
+the edge of what peers serve, and EEZ adds transaction types and EVM rules.
 
 ## 1. The EEZ stack as seen from Myotis
 
@@ -37,7 +39,7 @@ zone that exists. Measured on it:
 | L2 chain id / network id | 696991 / 696991 |
 | L2 genesis | `0xb6bd210b7e824a1aabc4c1ae5b64f5643715441b332c7152e641a36ba01835b2`; fork id `7478b563:0` as the Nethermind follower announces it in its Status (CRC32 of genesis, no fork scheduled yet; a later fork changes it) |
 | Block time | 2 s (`syncIntervalBlocks` 6: one Sync block per L1 slot) |
-| Registry (L1, mainnet) | `0x4b2760f84b83d6b3829e30a7573b0172b6d6402c`, also the registry of rollup 1 (chain 696990) |
+| Registry (L1, mainnet) | `0x4b2760f84b83d6b3829e30a7573b0172b6d6402c`, also the registry of rollup 1 (chain 696990). The EEZL2 proxy on L2 sits at the same address by design (eez-rollupX `deployments/ethereum-696990/README.md`: both managers at one address on their chains), so an address alone does not say which chain a proof is for |
 | Rollup id | 2 |
 | Sequencer | reth (`reth/v2.11.0`), behind the public RPC |
 | Followers | Nethermind EEZ build ([NethermindEth/nethermind#13867](https://github.com/NethermindEth/nethermind/pull/13867)), eth/68–72 and snap/1; Erigon's `canepat/eez` branch (no P2P on RollupX networks, no snap) |
@@ -85,8 +87,10 @@ The chain of checks, with nothing taken on a peer's word:
 rule. A root lands through `postAndVerifyBatch` and the rollup's proof system;
 on RollupX that is an attester quorum (2-of-3 in the EEZ team's own posts), not
 a ZK proof. Myotis would carry the assumption that the contract only accepts
-correct roots, which is the same kind of assumption the Base evaluation rates
-in its §3.2. This is a new trust anchor and needs the owner's decision (§4).
+correct roots. The Base evaluation rates that kind of assumption in its §3.2:
+only a ZK proof verified on L1 fits the rule; an attested proposal is "no — a
+new, documented exception at best". This is a new trust anchor and needs the
+owner's decision (§4).
 
 ## 3. What changes for Myotis at the fork
 
@@ -94,36 +98,70 @@ in its §3.2. This is a new trust anchor and needs the owner's decision (§4).
    same process: it is only as synced as mainnet is, as the Base evaluation's
    §7 describes for Base.
 2. **Freshness.** The anchored block is settled, not current. Measured
-   2026-11-24/25: L1-finalized root 3,700 blocks (~2 h) and 1,636 blocks
-   (55 min) behind the L2 head. The engine's freshness guards assume a
-   current head and would refuse or degrade every fee read on a
-   settled-only profile: the fee cache calls data older than 75 s or 5
-   blocks stale (`el/feecache.rs`), fee history goes stale after 64 × 12 s
-   (`myotis-engine/src/host.rs`). They need a per-network scale or a
-   settled-only meaning. A `parentHash` walk only reaches blocks OLDER
+   2026-11-24/25, with the registry read in the L1-finalized state (so L1
+   finality is inside these figures): 3,700 blocks (~2 h) and 1,636 blocks
+   (55 min) behind the L2 head. A `parentHash` walk only reaches blocks OLDER
    than the anchor, so a block newer than it cannot be verified from it at
    all. The options:
-   - serve reads at the settled block only (honest, 0.5–2 h old, and the
-     status screen's "verified head age" says so);
-   - verify the sequencer's signature on newer heads. Erigon's rollup0 design
-     gossips EIP-712 `SignedHead`s over libp2p gossipsub
+   - **Serve reads at the settled block only.** Three things are then owed,
+     none of which exists:
+     - *Which block tag it answers.* A wallet asks for `latest`; answering it
+       from a block 55 min–2 h behind the head is a well-formed answer to another
+       question, which `CLAUDE.md` §Trust rules out (APPLIED or REFUSED). The
+       Go engine's precedent is to read only at its finalized anchor and
+       refuse `latest` (its `eth_blockNumber` is an open owner decision,
+       `.claude/agent/architecture.md`). So either `latest`/`pending` are
+       refused and the settled block is served under `finalized` only, or
+       "may `latest` mean the settled block, labelled" goes to the owner. That
+       decides whether settled-only is a usable wallet profile at all.
+     - *An age.* `verifiedHeadAgeMs` (Rust engine) is the time since the
+       optimistic head's NUMBER last changed on this node, not the block's age
+       (`docs/how-it-works/readiness-and-verified-head-age.md`). On a
+       settled-only head it reads about 0 s right after each root lands, for a
+       block already 55 min–2 h old, and passes the 45 s warm threshold
+       (`ui/…/Readiness.kt`) between roots, so the strip would sit on "not
+       ready to transact" nearly always. It needs an age from the anchored
+       block's own timestamp and a readiness rule for it: `:myotis-api`
+       surface.
+     - *What a fee read means.* Nothing in the fee path looks at the anchored
+       head's age: the fee cache's `Fresh` has no age bound for the current
+       top (`el/feecache.rs`; its `STALE_MAX_*` only bound how long a value
+       for an OLDER top is still served), and `FEE_HISTORY_STALE_MAX`
+       (`myotis-engine/src/host.rs`) only applies when a build fails. So
+       `eth_gasPrice`, `eth_maxPriorityFeePerGas` and `eth_feeHistory` would
+       serve a "next block" fee computed 1,636–3,700 blocks ago, as exact. The
+       one guard that compares the head with the wall clock, the pre-broadcast
+       `send_check::head_is_fresh`, would refuse every send. Whether fee reads
+       are refused or served with their age is a decision, not a constant.
+   - **Verify the sequencer's signature on newer heads.** Erigon's rollup0
+     design gossips EIP-712 `SignedHead`s over libp2p gossipsub
      (`/eez/<chainId>/<rollupId>/heads/0`); RollupX sequencers sign no heads.
-     Which one the Gnosis zone gets is open (§6). A signed head rests on the
-     sequencer key, a weaker evidence rung like the Base evaluation's §4.
+     Which one the Gnosis zone gets is open (§6). A signed head rests on one
+     operator's key: "peer trusted" under `CLAUDE.md` §Trust, as the Base
+     evaluation rates the same evidence (its §2 table, §4 rung 3, and §8
+     decision 3: showing it at all, even labelled, is the owner's call). It
+     needs its own owner decision; the decision of §4 does not cover it.
 3. **Snap serving window.** Nethermind's EEZ overlay serves 16,384 blocks
    back by default, but from outside the public bootnode served less (#768,
    2026-11-11): a root 5,120 blocks back but not 6,144 at 12:15 UTC, and
    2,048 but not 4,096 at 13:55 UTC, so the window is neither a fixed depth
-   nor a fixed block. A settled root measured 1,636–3,700 blocks back; at the
-   worst of both measurements that is outside the window already, before L1
-   finality and fetch time are added. A Nethermind peer answers such a root
+   nor a fixed block. A settled root measured 1,636–3,700 blocks back (L1
+   finality included, item 2). At the worst sweep the limit lay somewhere
+   between 2,048 and 4,096, so 3,700 may already have been outside it; the
+   measurements do not settle that, and the time to fetch adds to it. A
+   Nethermind peer answers such a root
    with Disconnect reason 16, not an empty proof. A Disconnect alone does not
    prove an unknown root (the peer may drop us for reasons of its own), so it
    needs a confirming check, e.g. a shallower root the same peer still
-   serves, before it counts as "unknown root" rather than a peer fault.
-4. **Header-chain bound.** 8192 blocks are 4.5 h at 2 s; enough to walk back
-   from a settled anchor, as long as the Gnosis zone keeps a block time of 2 s
-   or more.
+   serves, before it counts as "unknown root" rather than a peer fault. The
+   Disconnect ends the session, so that check comes first on the same
+   session, or after a reconnect and the pause Nethermind's recent-IP filter
+   needs (#768).
+4. **Header-chain bound.** What the bound has to cover is the distance from
+   a newer head down to the anchor it links to (nothing above the anchor
+   verifies from it, item 2): 8192 blocks are 4.5 h at 2 s, more than the
+   measured settlement lag, as long as the Gnosis zone keeps a block time of
+   2 s or more. Below the anchor, older blocks link down as today.
 5. **Wire.** Chain id and network id stay 100; the fork id changes at the
    fork. The new transaction types need decoders and must enter the
    `transactionsRoot` and `receiptsRoot` rebuilds, the log index and fee reads.
@@ -133,12 +171,24 @@ in its §3.2. This is a new trust anchor and needs the owner's decision (§4).
    (`0xeeee…0077`), and whatever of Gnosis's own contracts survives the fork.
    Rust engine only: Besu has no EEZ semantics, so the Java engine drops out
    as it does for Tor and for Base.
-7. **Fork boundary.** Blocks before the fork stay verifiable from the last
-   Gnosis checkpoint the sync committee signed; blocks after it through L1.
-   A Gnosis profile needs both and a switch between them.
+7. **Fork boundary.** After the fork the Gnosis light client stops advancing,
+   and the weak-subjectivity gate parks it: Gnosis's bound is 3 periods
+   (`ChainConfig::gnosis()`, about 34 h), so every node is in `STALE_ANCHOR`
+   within two days of the last signed period, and rightly so, since a
+   retired validator set can sign a competing history. So the last signed
+   Gnosis checkpoint cannot stay a live anchor. A pre-fork block can rest on
+   one of two things:
+   - a value the release pins: a bundled checkpoint table for chain 100,
+     whose top is at or below the fork (today the table is mainnet only,
+     `myotis_core::checkpoints::for_chain`, and it changes only in a release
+     PR); the read keeps the table's trust;
+   - a `parentHash` walk down from a post-fork registry anchor, if the chain
+     links across the fork; the read then carries the registry's trust
+     label, not the sync committee's.
+   Which one is a decision for the Gnosis profile (step 7 of §5).
 8. **Discovery.** The RollupX network has one published discv4 seed and no
-   DNS list. Crawls from it (#768 on 2026-11-11, again 2026-11-24, 170–270
-   nodes dialled each) found no other node of the chain; nodes answering with
+   DNS list. Crawls from it (two in #768 on 2026-11-11, three on 2026-11-24;
+   99–269 nodes dialled each) found no other node of the chain; nodes answering with
    another network id and the same genesis turned out to echo whatever genesis
    they are sent. Myotis has to take EEZ peers from configured enodes until the
    Gnosis zone publishes its own.
@@ -151,6 +201,25 @@ the Rust engine but **exposed to no host and no wallet**. The trust rule in
 exposed, the rule change (a new entry under *Trust*, with scope and limits in
 `.claude/agent/data-sources.md`) goes to the owner as its own before/after
 question.
+
+**The gate.** "Not listed" is not a gate: in the Rust engine a network
+resolves by name inside the engine (`resolve_config` →
+`catalog::canonical_network_name` → `config_for`), whatever `availableNetworks`
+lists, and the engine library is also published for other wallets. And the
+final `feature/gnosis-eez` → `main` PR puts this branch into a `main` that must
+be releasable at every commit. So, for every part of this branch:
+
+- the registry anchor and the 696991 profile are reachable only from unit and
+  integration tests and from `examples/` (as `eez_probe` is);
+- never through `config_for` or `catalog`, the UniFFI surface, the C ABI or
+  `myotis-rpcd`;
+- no host module and no Kotlin/Java code refers to them.
+
+A part that needs more than that (a cargo feature, a host flag) asks the owner
+first.
+
+The settled-only freshness policy (§3 item 2: block tags, the age, fee reads)
+and sequencer-signed heads are separate decisions, not covered by this one.
 
 ## 5. The setup and the order of work
 
@@ -197,16 +266,20 @@ public). The likely first rehearsal is Chiado, and Myotis's Chiado profile
    proof down to the L2 block hash, and the hand-off of that hash, with the
    L1 slot it was read at, to the L2 chain's anchor under its own trust
    label; tested on a captured mainnet proof.
-2. **The 696991 dev profile** (Rust engine, not in any host catalogue) and
+2. **The 696991 dev profile** (Rust engine, behind the gate of §4) and
    golden vectors captured from a follower: headers, bodies carrying
    `0x45`/`0x46`/`0x76`, receipts, with their roots.
 3. Decoders and root rebuilds for the EEZ transaction types.
 4. The EEZ rules in revm, checked against the development oracle.
-5. The freshness policy: settled-only first, signed heads if the Gnosis zone
-   has them; the fee and fee-history staleness guards per network.
+5. The freshness policy, as owner decisions first (§3 item 2): which tags a
+   settled-only profile answers, its age and readiness rule, what a fee read
+   means; signed heads only on their own trust decision.
 6. Peers from configured enodes; the serving window (reason 16 confirmed
-   against a shallower root before it reads as "unknown root").
-7. A Gnosis profile that switches anchors at the fork.
+   against a shallower root, on the same session or after the reconnect
+   pause, before it reads as "unknown root").
+7. A Gnosis profile that switches anchors at the fork, including what a
+   pre-fork read rests on (§3 item 7); if it is a release-pinned table, a
+   bundled checkpoint table for chain 100 is part of this step.
 
 ## 6. Open questions for the Gnosis / EEZ teams
 
