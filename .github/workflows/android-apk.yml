@@ -52,7 +52,9 @@ jobs:
     # job below needs this one, so this `if` must stay true on every event but
     # pull_request, or a tag would publish nothing (#582). Before the queue a
     # review gate (wait-for-claude-review.yml) held this job until the PR's
-    # review had finished; it only ever waits on a PR, so it went with them.
+    # review had finished; it only ever waits on a PR, so it went with them
+    # (and the file itself on 2026-11-25, when its last callers, the msi and
+    # the iOS framework, moved to the queue too).
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-26.04
     permissions:

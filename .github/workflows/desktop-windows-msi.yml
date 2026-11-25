@@ -20,34 +20,28 @@ name: Desktop MSI (Windows)
 on:
   push:
     branches: [ "main" ]
-  # Path-filtered, unlike the dmg (which builds in the merge queue for every PR
-  # into main since 2026-11-19). A Windows packaging leg on every PR would
-  # cost more than it tells (the reason desktop-linux-deb.yml has no PR trigger
-  # at all), but a change to the packaging, or to what the smoke below reads
-  # (the engine loader's log line, the log file's location), should prove the
-  # msi before it merges. rust/** is deliberately not here: no PR compiles the
-  # engine for Windows today (node-binding.yml's Windows leg runs on main), and
-  # this leg on every Rust PR would be the deb's queue problem again. Base
-  # branches stay unscoped (CLAUDE.md, "Multi-PR plans"); the review gate's
-  # `if` below skips a PR whose base is not main, as the iOS framework's does.
-  # (The APK and the dmg build on no PR: they build in the merge queue.)
+  # The msi builds in the merge queue, not on a PR (owner's request,
+  # 2026-11-25, Myotis's queue made to work as VesperBats/punicus#368 does),
+  # and there only for a change to what it packages: the paths the `scope`
+  # job below lists, which this trigger was filtered on before. A Windows
+  # packaging leg for every change would cost more than it tells (the reason
+  # desktop-linux-deb.yml has no PR trigger at all), but a change to the
+  # packaging, or to what the smoke below reads (the engine loader's log line,
+  # the log file's location), should prove the msi before it merges. rust/** is
+  # deliberately not on the list: no PR compiles the engine for Windows today
+  # (node-binding.yml's Windows leg runs on main), and this leg for every Rust
+  # change would be the deb's queue problem again. pull_request stays,
+  # unscoped (any base branch) and unfiltered, so every PR shows `Windows MSI
+  # result`, the check the queue requires, as passed; a check that is absent
+  # the queue would wait for. merge_group takes no path filter either. Before
+  # the queue a PR into main that touched those paths built it, after a review
+  # gate, and a part PR into a feature branch skipped it (owner ruling,
+  # 2026-10-09); the final feature → main PR goes through the queue like any
+  # other. (The APK and the dmg build in the queue since 2026-11-19.)
   pull_request:
-    paths:
-      - ".github/workflows/desktop-windows-msi.yml"
-      # The review gate it calls: a PR that breaks that file goes red here.
-      - ".github/workflows/wait-for-claude-review.yml"
-      - ".java-version"
-      - ".github/actions/rust-toolchain/**"
-      - "rust/rust-toolchain.toml"
-      - "app-desktop/build.gradle.kts"
-      - "app-desktop/src/main/kotlin/io/myotis/desktop/Main.kt"
-      - "app-desktop/src/main/resources/logback-desktop.xml"
-      - "myotis-engine-rust/src/main/java/io/myotis/engines/rust/RustEngineNative.java"
-      # The committed UniFFI bindings: the verify step checks the engine against them.
-      - "myotis-engine-rust/src/main/kotlin/uniffi/**"
-      - "build.gradle.kts"
-      - "gradle/libs.versions.toml"
-  # Any branch, on demand from the Actions tab.
+  merge_group:
+  # Any branch, on demand from the Actions tab: a PR that wants the msi
+  # before it is queued.
   workflow_dispatch:
 
 # Cancel a superseded run when new commits land on the same branch/PR. The
@@ -62,18 +56,39 @@ defaults:
     shell: bash
 
 jobs:
-  # Holds the build until this PR's Claude review has finished, as the iOS
-  # framework's build does (see wait-for-claude-review.yml). Its `if:` must stay true
-  # on every non-pull_request event: skipping it skips the build too.
-  review-gate:
-    name: Review gate
-    if: github.event_name != 'pull_request' || github.base_ref == 'main'
-    uses: ./.github/workflows/wait-for-claude-review.yml
+  # Whether a merge-queue entry builds the msi (queue-scope.yml): the list is
+  # what this workflow's pull_request trigger was filtered on before the
+  # queue. On a push to main and on dispatch it answers true. Skipped on a PR,
+  # where nothing builds.
+  scope:
+    name: Queue scope
+    if: github.event_name != 'pull_request'
+    uses: ./.github/workflows/queue-scope.yml
+    with:
+      paths: |
+        .github/workflows/desktop-windows-msi.yml
+        .github/workflows/queue-scope.yml
+        scripts/queue_scope.py
+        .java-version
+        .github/actions/rust-toolchain/**
+        rust/rust-toolchain.toml
+        app-desktop/build.gradle.kts
+        app-desktop/src/main/kotlin/io/myotis/desktop/Main.kt
+        app-desktop/src/main/resources/logback-desktop.xml
+        myotis-engine-rust/src/main/java/io/myotis/engines/rust/RustEngineNative.java
+        # The committed UniFFI bindings: the verify step checks the engine against them.
+        myotis-engine-rust/src/main/kotlin/uniffi/**
+        build.gradle.kts
+        gradle/libs.versions.toml
     permissions:
-      actions: read
+      contents: read
 
   build:
-    needs: review-gate
+    needs: scope
+    # No PR builds the msi: the merge queue does (the header says why), for an
+    # entry the scope job keeps. `!= 'false'`: an empty answer (a failed scope
+    # job) builds. Every event but pull_request and merge_group answers true.
+    if: github.event_name != 'pull_request' && needs.scope.outputs.build != 'false'
     name: Build Windows .msi (x64)
     runs-on: windows-2025
     timeout-minutes: 90
@@ -423,3 +438,40 @@ jobs:
           # Artifacts are immutable per run; a re-run would 409 without this
           # (the same fix the dmg and deb workflows carry).
           overwrite: true
+
+  # The one check the merge queue requires of this workflow, as in
+  # desktop-dmg.yml and android-apk.yml: a fixed name that reports on every
+  # event. In the queue it passes if the build succeeded, or if the scope job
+  # left the entry out. On a PR the build does not run, and it passes, so the
+  # PR can be queued; elsewhere it fails only for a build that failed.
+  # `always()`, not `!cancelled()`: in a cancelled run this job must still run
+  # and fail, since a skipped required check counts as passed.
+  result:
+    name: Windows MSI result
+    needs: [scope, build]
+    if: ${{ always() }}
+    runs-on: ubuntu-26.04
+    permissions: {}
+    steps:
+      - name: Check the msi build
+        env:
+          EVENT: ${{ github.event_name }}
+          BUILD: ${{ needs.build.result }}
+          IN_SCOPE: ${{ needs.scope.outputs.build }}
+        run: |
+          echo "On $EVENT: msi build $BUILD (in scope: ${IN_SCOPE:-unknown})."
+          if [ "$EVENT" = pull_request ]; then
+            echo "::notice title=msi not built::No PR builds the msi: the merge queue does, for a change to its packaging, or dispatch this workflow on the branch."
+          fi
+          if [ "$EVENT" = merge_group ]; then
+            [ "$BUILD" = success ] && exit 0
+            if [ "$BUILD" = skipped ] && [ "$IN_SCOPE" = false ]; then
+              echo "::notice title=msi not built::This queue entry changes nothing the msi packages."
+              exit 0
+            fi
+            echo "::error::The merge queue needs the msi build to succeed (it was $BUILD)."
+            exit 1
+          fi
+          case "$BUILD" in
+            failure|cancelled) echo "::error::The msi build did not succeed ($BUILD)."; exit 1 ;;
+          esac

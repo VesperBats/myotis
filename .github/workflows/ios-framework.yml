@@ -13,24 +13,24 @@ name: iOS Framework (MyotisKit)
 # break in IosRpcBackend or a drift in the engine's C ABI header would
 # otherwise sail through green until someone built the app on a Mac (which is
 # why the revert PRs each needed a manual compileKotlinIos* run). The leg on
-# pushes to main and on PRs INTO main is that safety net (a PR into a feature
-# branch skips it — see the review-gate job); the tag leg publishes the
-# xcframework to the same pre-release the sibling asset workflows populate.
+# pushes to main and in the merge queue is that safety net (no PR builds it:
+# see the triggers); the tag leg publishes the xcframework to the same
+# pre-release the sibling asset workflows populate.
 
 on:
-  # Scope push to main + release tags so a branch push that also has an open PR
-  # doesn't build twice (the PR is covered by pull_request below). Paths gate
-  # both push-to-main and PRs to the inputs that can change MyotisKit — a
-  # docs-only PR shouldn't pay a 10x-billed macOS build. The set is everything
-  # the framework compiles from: rust/ (the C ABI + engine), :app-ios and the
-  # modules it bundles (:myotis-engine-ios, :ui, :jsonrpc-server), and the Gradle
-  # build inputs.
+  # Scope push to main + release tags: a PR's branch builds in the merge queue
+  # (merge_group below). Paths gate the push to main to the inputs that can
+  # change MyotisKit — a docs-only change shouldn't pay a 10x-billed macOS
+  # build. The set is everything the framework compiles from: rust/ (the C ABI
+  # + engine), :app-ios and the modules it bundles (:myotis-engine-ios, :ui,
+  # :jsonrpc-server), and the Gradle build inputs. The scope job below holds
+  # the same list for the merge queue; keep the two in step.
   # Path filters are ignored for TAG pushes (GitHub behaviour, same as the
   # sibling ios-xcframework.yml), so releases still fire regardless.
   push:
     branches: [ "main" ]
     tags: [ "v*" ]
-    paths: &fw_paths
+    paths:
       - 'rust/**'
       - 'app-ios/**'
       - 'myotis-engine-ios/**'
@@ -40,16 +40,28 @@ on:
       - 'settings.gradle.kts'
       - 'gradle/libs.versions.toml'
       - '.github/workflows/ios-framework.yml'
-      # The review gate it calls: a PR that breaks that file goes red here.
-      - '.github/workflows/wait-for-claude-review.yml'
+      - '.github/workflows/queue-scope.yml'
+      - 'scripts/queue_scope.py'
       - '.java-version'
       - '.xcode-version'
       - '.github/actions/select-xcode/**'
       - '.github/actions/rust-toolchain/**'
+  # The framework builds in the merge queue, not on a PR (owner's request,
+  # 2026-11-25, Myotis's queue made to work as VesperBats/punicus#368 does):
+  # once per PR into main, on the commit main will become, and only for an
+  # entry that changes the list above (the scope job). pull_request stays,
+  # unscoped (any base branch) and unfiltered, so every PR shows `iOS
+  # framework result`, the check the queue requires, as passed; a check that
+  # is absent the queue would wait for. merge_group takes no path filter
+  # either. Before the queue a PR into main that touched the list built it,
+  # after a review gate, and a part PR into a feature branch skipped it (owner
+  # ruling, 2026-10-09); the final feature → main PR goes through the queue
+  # like any other.
   pull_request:
-    paths: *fw_paths
-  # On demand for a branch the PR job skips (a part PR into a feature branch —
-  # see the review-gate job below).
+  merge_group:
+  # On demand for any branch: a PR that touches the engine's C ABI or the iOS
+  # triples and wants the framework before it is queued — this is the ONLY
+  # check that compiles :app-ios, see the header.
   workflow_dispatch:
 
 # Cancel a superseded run per ref. The event is part of the group because a
@@ -63,31 +75,42 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Holds the build until this PR's Claude review has finished, so the macOS
-  # runner does not build a commit the review might still ask to change. It
-  # passes straight through on every other event — see
-  # wait-for-claude-review.yml.
-  review-gate:
-    name: Review gate
-    # Skipped on a PR whose base is not main (owner ruling, 2026-10-09): a part
-    # PR of a multi-PR plan targets its feature branch, and a macOS runner leg
-    # per part costs more than it tells; the final feature → main PR builds
-    # it. Everything below needs this job, so the build is skipped with it (a
-    # dependent job is skipped when a needed job was, unless its `if` uses
-    # always()) — and on a tag the release uploads would be. So an `if:` on
-    # this job MUST be true on every non-pull_request event (push to main, v*
-    # tags, dispatch); the only safe test is the PR's base branch, which is all
-    # this one does. The release jobs only run on tags. A part that touches the
-    # engine's C ABI or the iOS triples can run this on demand from the
-    # Actions tab (workflow_dispatch) — this is the ONLY check that compiles
-    # :app-ios, see the header.
-    if: github.event_name != 'pull_request' || github.base_ref == 'main'
-    uses: ./.github/workflows/wait-for-claude-review.yml
+  # Whether a merge-queue entry builds the framework (queue-scope.yml): the
+  # push filter's list above. On a push to main, a tag and a dispatch it
+  # answers true, so the build and the tag's release upload behind it run.
+  # Skipped on a PR, where nothing builds.
+  scope:
+    name: Queue scope
+    if: github.event_name != 'pull_request'
+    uses: ./.github/workflows/queue-scope.yml
+    with:
+      paths: |
+        rust/**
+        app-ios/**
+        myotis-engine-ios/**
+        ui/**
+        jsonrpc-server/**
+        **/build.gradle.kts
+        settings.gradle.kts
+        gradle/libs.versions.toml
+        .github/workflows/ios-framework.yml
+        .github/workflows/queue-scope.yml
+        scripts/queue_scope.py
+        .java-version
+        .xcode-version
+        .github/actions/select-xcode/**
+        .github/actions/rust-toolchain/**
     permissions:
-      actions: read
+      contents: read
 
   build:
-    needs: review-gate
+    needs: scope
+    # No PR builds the framework: the merge queue does, for an entry the scope
+    # job keeps. Every job below needs this one, so this `if` must stay true on
+    # every event but pull_request and merge_group, or a tag would publish
+    # nothing (#582): the scope job answers true on all of them. `!= 'false'`:
+    # an empty answer (a failed scope job) builds.
+    if: github.event_name != 'pull_request' && needs.scope.outputs.build != 'false'
     # macos-15 for a recent Xcode toolchain (the Kotlin/Native iOS link needs
     # Xcode's clang/ld for the target). macos-14's Xcode also linked a static
     # framework (that image was retired on 2026-11-02), but 15 tracks closer to the
@@ -329,3 +352,40 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
         run: bash .github/release-assets.sh --checksums "${GITHUB_REF_NAME}"
+
+  # The one check the merge queue requires of this workflow, as in
+  # desktop-dmg.yml and android-apk.yml: a fixed name that reports on every
+  # event. In the queue it passes if the build succeeded, or if the scope job
+  # left the entry out. On a PR the build does not run, and it passes, so the
+  # PR can be queued; elsewhere it fails only for a build that failed.
+  # `always()`, not `!cancelled()`: in a cancelled run this job must still run
+  # and fail, since a skipped required check counts as passed.
+  result:
+    name: iOS framework result
+    needs: [scope, build]
+    if: ${{ always() }}
+    runs-on: ubuntu-26.04
+    permissions: {}
+    steps:
+      - name: Check the framework build
+        env:
+          EVENT: ${{ github.event_name }}
+          BUILD: ${{ needs.build.result }}
+          IN_SCOPE: ${{ needs.scope.outputs.build }}
+        run: |
+          echo "On $EVENT: framework build $BUILD (in scope: ${IN_SCOPE:-unknown})."
+          if [ "$EVENT" = pull_request ]; then
+            echo "::notice title=MyotisKit not built::No PR builds the iOS framework: the merge queue does, for a change it compiles from, or dispatch this workflow on the branch."
+          fi
+          if [ "$EVENT" = merge_group ]; then
+            [ "$BUILD" = success ] && exit 0
+            if [ "$BUILD" = skipped ] && [ "$IN_SCOPE" = false ]; then
+              echo "::notice title=MyotisKit not built::This queue entry changes nothing the iOS framework compiles from."
+              exit 0
+            fi
+            echo "::error::The merge queue needs the iOS framework build to succeed (it was $BUILD)."
+            exit 1
+          fi
+          case "$BUILD" in
+            failure|cancelled) echo "::error::The iOS framework build did not succeed ($BUILD)."; exit 1 ;;
+          esac
