@@ -505,10 +505,19 @@ const VERIFY_DEADLINE: std::time::Duration = std::time::Duration::from_secs(90);
 ///
 /// ```json
 /// [{"block":…,"slot":…,"roles":[…],"state":"verified"|"contradicted"|"unverified"|"unavailable",
-///   "final":true,"confirmed":[…],"contradicted":[…],"unchecked":[…],
+///   "final":true,"blockHash":"0x…","blockTimestamp":…,
+///   "confirmed":[…],"contradicted":[…],"unchecked":[…],
 ///   "txHash":"0x…","from":"0x…","to":"0x…"|null,"value":"0x…",
-///   "transfer":{"token":"0x…","from":"0x…","to":"0x…","data":"0x…"}|null,"reason":"…"}]
+///   "transfer":{"token":"0x…","from":"0x…","to":"0x…","amount":"0x…"|null,"tokenId":"0x…"|null}|null,
+///   "reason":"…"}]
 /// ```
+///
+/// Every entry the check ran on (`verified`, `contradicted`, or `unverified` because a role
+/// could not be checked, as for `trace`) carries the block it was checked in: `blockHash` and
+/// `blockTimestamp` (unix seconds), both from that block's verified header. An entry whose
+/// check did not run (`unavailable`, or `unverified` with a `reason`) carries neither, even
+/// when its block was read but its receipts were not. A `transfer`'s `amount` is an ERC-20
+/// one's, `tokenId` an ERC-721 one's; the other is null.
 ///
 /// `unavailable` (with its `reason`) is a block or its receipts no peer served now: ask
 /// again. `unverified` with a `reason` is a block this node cannot verify (outside what it
@@ -628,7 +637,7 @@ pub fn verify_json(
                 (Err(_), false) => None,
             };
             let c = check(&address, slot, roles, &b, r);
-            let v = verified::render(block, slot, roles, &c, block <= finalized, &b.hash);
+            let v = verified::render(block, slot, roles, &c, block <= finalized, &b);
             // Kept only when final and complete: every role that verified data can check was
             // checked (TRACE never is).
             let complete = c.unchecked & !role::TRACE == 0;
@@ -657,7 +666,8 @@ fn parse_entries(json: &str) -> Result<Vec<(u64, u32, u8)>, String> {
                 // them); they are not inputs. Anything else is refused.
                 if !matches!(
                     k.as_str(),
-                    "block" | "slot" | "roles" | "state" | "final" | "blockHash" | "confirmed" | "contradicted"
+                    "block" | "slot" | "roles" | "state" | "final" | "blockHash" | "blockTimestamp" | "confirmed"
+                        | "contradicted"
                         | "unchecked" | "txHash" | "from" | "to" | "value" | "transfer" | "reason"
                 ) {
                     return Err(format!("unknown entry field '{k}'"));
@@ -693,6 +703,7 @@ fn parse_entries(json: &str) -> Result<Vec<(u64, u32, u8)>, String> {
 mod verified {
     //! The verdicts kept, and how an entry with one is rendered.
     use myotis_net::el::addrcheck::{Check, State};
+    use myotis_net::el::reader::VerifiedBlock;
     use std::collections::HashMap;
     use std::sync::Mutex;
 
@@ -772,7 +783,16 @@ mod verified {
         }
     }
 
-    pub(super) fn render(block: u64, slot: u32, roles: u8, c: &Check, finalized: bool, hash: &[u8; 32]) -> serde_json::Value {
+    /// An entry checked in the verified block `b`: its `blockHash` and `blockTimestamp` (unix
+    /// seconds) are `b`'s, from its verified header, never from a peer's word.
+    pub(super) fn render(
+        block: u64,
+        slot: u32,
+        roles: u8,
+        c: &Check,
+        finalized: bool,
+        b: &VerifiedBlock,
+    ) -> serde_json::Value {
         let state = match c.state {
             State::Verified => "verified",
             State::Contradicted => "contradicted",
@@ -786,7 +806,9 @@ mod verified {
             "final": finalized,
             // The block the verdict was checked in: above finality it can be reorganized
             // away, and a host tells by this hash.
-            "blockHash": hex(hash),
+            "blockHash": hex(&b.hash),
+            // When that block was made, so a host can date the entry.
+            "blockTimestamp": b.header.timestamp,
             "confirmed": super::role_names(c.confirmed),
             "contradicted": super::role_names(c.contradicted),
             "unchecked": super::role_names(c.unchecked),
@@ -1033,6 +1055,25 @@ mod reader {
 mod tests {
     use super::*;
 
+    /// A verified block `number` made at `timestamp`, every other u64 of its header distinct.
+    fn block_at(number: u64, timestamp: u64) -> myotis_net::el::reader::VerifiedBlock {
+        myotis_net::el::reader::VerifiedBlock {
+            hash: [0xab; 32],
+            header: myotis_core::header::BlockHeader {
+                number,
+                gas_limit: 30_000_001,
+                gas_used: 15_000_002,
+                timestamp,
+                ..Default::default()
+            },
+            tx_hashes: vec![],
+            full_transactions: None,
+            raw_transactions: Default::default(),
+            withdrawals: None,
+            ommers: Default::default(),
+        }
+    }
+
     #[test]
     fn settings_are_applied_or_refused_whole() {
         let ok = parse_config(r#"{"importer":"0x1111111111111111111111111111111111111111","swarm":{"network":"dev","networkId":7,"bootnodes":["/ip4/192.0.2.1/tcp/1634"]}}"#).unwrap();
@@ -1068,7 +1109,6 @@ mod tests {
     fn verify_entries_are_applied_or_refused_whole() {
         let ok = parse_entries(r#"[{"block":100,"slot":3,"roles":["from","emitter"],"state":"unverified"},{"block":101,"slot":0,"roles":["block"]}]"#).unwrap();
         assert_eq!(ok, vec![(100, 3, 0x05), (101, 0, 0x40)]);
-        // A kept verdict as a page renders it goes back in as it came.
         // A kept verdict exactly as render() writes it (and a page shows it) goes back in.
         let c = myotis_net::el::addrcheck::Check {
             state: myotis_net::el::addrcheck::State::Verified,
@@ -1087,7 +1127,7 @@ mod tests {
                 id: None,
             }),
         };
-        let rendered = verified::render(1, 2, 0x01, &c, true, &[9; 32]);
+        let rendered = verified::render(1, 2, 0x01, &c, true, &block_at(1, 1_700_000_000));
         let unverifiable = verified::not_verifiable(1, 3, 0x02, "outside the window");
         let unavailable = verified::unavailable(1, 4, 0x04, "no peer");
         let echoed = serde_json::json!([rendered, unverifiable, unavailable]).to_string();
@@ -1110,11 +1150,55 @@ mod tests {
     }
 
     #[test]
+    fn a_checked_entry_carries_its_verified_blocks_hash_and_timestamp() {
+        use myotis_net::el::addrcheck::{Check, State};
+        let check = |state| Check {
+            state,
+            confirmed: 0,
+            contradicted: 0,
+            unchecked: 0,
+            tx_hash: None,
+            from: None,
+            to: None,
+            value: None,
+            transfer: None,
+        };
+        for (state, name) in
+            [(State::Verified, "verified"), (State::Contradicted, "contradicted"), (State::Unverified, "unverified")]
+        {
+            for slot in [0, 2] {
+                // Every u64 of the header differs, so taking another one than the timestamp fails.
+                let b = block_at(7, 1_764_000_123);
+                let v = verified::render(7, slot, 0x01, &check(state), false, &b);
+                assert_eq!(v["state"], name);
+                assert_eq!(v["blockHash"], format!("0x{}", "ab".repeat(32)));
+                assert_eq!(v["blockTimestamp"], 1_764_000_123_u64, "{name}, slot {slot}");
+            }
+        }
+        // An entry whose check did not run has no block to date it by.
+        for v in [verified::not_verifiable(7, 2, 0x01, "outside the window"), verified::unavailable(7, 2, 0x01, "no peer")] {
+            assert!(v.get("blockTimestamp").is_none() && v.get("blockHash").is_none(), "{v}");
+        }
+    }
+
+    #[test]
     fn a_kept_verdict_is_what_a_later_page_shows() {
         use myotis_addr1::client::Page;
         use myotis_addr1::records::{role, Entry};
         let who = (1u64, [0x42; 20]);
-        let kept = serde_json::json!({"block": 500, "slot": 2, "roles": ["from"], "state": "verified", "final": true});
+        // Kept as render() wrote it: the page shows it whole, its block's timestamp included.
+        let c = myotis_net::el::addrcheck::Check {
+            state: myotis_net::el::addrcheck::State::Verified,
+            confirmed: role::FROM,
+            contradicted: 0,
+            unchecked: 0,
+            tx_hash: Some([3; 32]),
+            from: Some([0x42; 20]),
+            to: None,
+            value: None,
+            transfer: None,
+        };
+        let kept = verified::render(500, 2, role::FROM, &c, true, &block_at(500, 1_764_000_456));
         let trust = Trust::default();
         verified::keep(trust, who.0, &who.1, 500, 2, role::FROM, &kept);
         let read = Read {
@@ -1128,8 +1212,10 @@ mod tests {
             },
         };
         let v: serde_json::Value = serde_json::from_str(&page_json(&read, [0; 20], Some(600), who, trust, &parse_options("").unwrap())).unwrap();
-        assert_eq!(v["entries"][0]["state"], "verified");
+        assert_eq!(v["entries"][0], kept);
+        assert_eq!(v["entries"][0]["blockTimestamp"], 1_764_000_456_u64);
         assert_eq!(v["entries"][1]["state"], "unverified");
+        assert!(v["entries"][1].get("blockTimestamp").is_none(), "an unchecked candidate has no verified block");
         // Another address's page does not see it.
         let v: serde_json::Value = serde_json::from_str(&page_json(&read, [0; 20], Some(600), (1, [0x43; 20]), trust, &parse_options("").unwrap())).unwrap();
         assert_eq!(v["entries"][0]["state"], "unverified");
