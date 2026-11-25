@@ -125,6 +125,10 @@ jobs:
     # dev fleet's Xcode 26.
     name: Build MyotisKit framework
     runs-on: macos-15
+    # Its runs take 12 to 28 minutes (a tag's, 28). A hung job must not
+    # outlive the merge queue's status-check timeout and keep a scarce macOS
+    # runner: the same limit as the msi's.
+    timeout-minutes: 90
     permissions:
       contents: read
     steps:
