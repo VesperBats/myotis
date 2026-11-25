@@ -118,12 +118,15 @@ The page:
 ```
 
 `slot` is `0` for the block itself (fee recipient, withdrawal, uncle), else the transaction's
-index plus one. A page is never read at an older head than its cursor's.
+index plus one. A page is never read at an older head than its cursor's. An entry with a kept
+verdict (a final, complete one an earlier verify call found) appears in full, as
+`myotis_verifyAddressHistoryEntries` returned it, `blockHash` and `blockTimestamp` included.
 
 ### `myotis_verifyAddressHistoryEntries(address, entries)`
 
 Up to 50 entries, as a page returned them. A checked entry comes back with its `state`,
-`final`, the block hash it was checked in, the roles `confirmed` / `contradicted` /
+`final`, the block it was checked in (`blockHash`, and `blockTimestamp` in unix seconds, both
+from its verified header), the roles `confirmed` / `contradicted` /
 `unchecked`, and for a transaction its `txHash`, `from`, `to`, `value` and the first
 ERC-20/721 `transfer` the address is a party of. An entry that could not be checked carries
 only its `state` and a `reason`: `unavailable` when the block or its receipts could not be

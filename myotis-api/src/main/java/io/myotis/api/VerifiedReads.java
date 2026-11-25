@@ -556,6 +556,8 @@ public interface VerifiedReads {
      * one verified block (and its receipts where a role needs them) per block (#899). A
      * JSON array, each entry with its {@code "state"} ({@code verified}, {@code contradicted},
      * {@code unverified}, {@code unavailable} with a {@code reason}: ask again), {@code final},
+     * for an entry the check ran on the block it was checked in ({@code blockHash} and
+     * {@code blockTimestamp}, unix seconds, both from its verified header; ABI 61),
      * the per-role outcome and, for a transaction, its {@code txHash}, {@code from}, {@code to},
      * {@code value} and {@code transfer}. A final, complete verdict is kept, and later pages
      * show it. Default: {@link #ADDRESS_HISTORY_REFUSED}.

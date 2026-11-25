@@ -429,7 +429,14 @@ uniffi::setup_scaffolding!();
 ///      addr1 index on Swarm and its per-entry check (#899). Additive functions —
 ///      bumped so a host that offers the history is never paired with an engine
 ///      that lacks it. A build without the `swarm` feature refuses them (-32602).
-pub const ABI_VERSION: i32 = 60;
+/// v61: "blockTimestamp" (unix seconds) on every entry `verify_address_history_json`
+///      checked (`verified`, `contradicted`, and `unverified` from the check), next to its
+///      `blockHash`, from the same verified header; an entry not checked (`unavailable`,
+///      `unverified` with a `reason`) carries neither, and the verify call takes the field
+///      back with a page's others. A kept verdict carries it too, so the pages that show one
+///      do. A payload extension, no signature change — bumped, as v41 and v52 were, so a
+///      host that dates the history's rows is never paired with an engine that cannot.
+pub const ABI_VERSION: i32 = 61;
 
 // Keep the workspace edge alive so `cargo build -p myotis-engine` type-checks the
 // consensus crate too.
