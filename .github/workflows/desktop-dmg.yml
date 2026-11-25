@@ -43,7 +43,9 @@ jobs:
     # pull_request, or a tag would publish nothing (#582). It reads no matrix
     # value, so a job-level `if` is safe here (see the matrix comment). Before
     # the queue a review gate (wait-for-claude-review.yml) held this job until
-    # the PR's review had finished; it only ever waits on a PR, so it went.
+    # the PR's review had finished; it only ever waits on a PR, so it went
+    # (and the file itself on 2026-11-25, when its last callers, the msi and
+    # the iOS framework, moved to the queue too).
     if: github.event_name != 'pull_request'
     # The regular legs keep their historical check name; the PoC leg is suffixed.
     name: Build macOS .dmg (${{ matrix.arch }}${{ matrix.flavor == 'bee-poc' && ', bee-poc' || '' }})

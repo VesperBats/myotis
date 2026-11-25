@@ -1,0 +1,84 @@
+# Whether a merge-queue entry builds an artifact: the path filter of a workflow
+# whose check the queue requires.
+#
+# A required check must report on pull_request and on merge_group alike: GitHub
+# takes a skipped check as passed but waits for an absent one until the queue's
+# timeout. So a required workflow takes no `paths:` filter on either event
+# (merge_group takes none at all), and its build job asks this one instead. A
+# caller passes the path list its pull_request trigger was filtered on before
+# the queue:
+#
+#     scope:
+#       name: Queue scope
+#       if: github.event_name != 'pull_request'
+#       uses: ./.github/workflows/queue-scope.yml
+#       with:
+#         paths: |
+#           rust/**
+#       permissions:
+#         contents: read
+#     build:
+#       needs: scope
+#       if: github.event_name != 'pull_request' && needs.scope.outputs.build != 'false'
+#
+# Callers: desktop-windows-msi, ios-framework. In the queue the answer is the
+# diff from main's tip to the commit it tests (entries ahead included) (scripts/queue_scope.py,
+# which says how, and scripts/test_queue_scope.py). On every other event it is
+# `true` without asking, so a build job may need this one on a push to main and
+# on a tag: its `if` stays true there, and the release uploads behind it run.
+#
+# FAIL-OPEN, like the review gate this replaces in its callers: an API error, a
+# capped file list or a broken script answers `true`, and `continue-on-error`
+# covers a job that fails anyway; its output is then empty, which a caller
+# tests with `!= 'false'`. Only a cancelled run skips the build, and the
+# caller's `result` job, which runs on always(), fails then.
+name: Queue scope
+
+on:
+  workflow_call:
+    inputs:
+      paths:
+        description: "The paths: patterns, one per line, as a pull_request filter takes them"
+        required: true
+        type: string
+    outputs:
+      build:
+        description: "'false' when a merge-queue entry changes nothing on the list; 'true' otherwise"
+        value: ${{ jobs.scope.outputs.build }}
+
+jobs:
+  scope:
+    name: Scope
+    runs-on: ubuntu-26.04
+    continue-on-error: true
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      build: ${{ steps.decide.outputs.build }}
+    steps:
+      # The script only; in the queue this is the commit the queue tests.
+      - name: Checkout the scope script
+        if: github.event_name == 'merge_group'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          sparse-checkout: scripts/queue_scope.py
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - name: Decide
+        id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
+          BASE_REF: ${{ github.event.merge_group.base_ref }}
+          HEAD_SHA: ${{ github.event.merge_group.head_sha }}
+          PATHS: ${{ inputs.paths }}
+        run: |
+          if [ "$EVENT" != merge_group ]; then
+            echo "Build: not a merge-queue entry ($EVENT)."
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          python3 -I scripts/queue_scope.py
