@@ -1,0 +1,80 @@
+{
+  "formatVersion": "1.1",
+  "component": {
+    "group": "eth.myotis",
+    "module": "myotis-api",
+    "version": "0.1.24",
+    "attributes": {
+      "org.gradle.status": "release"
+    }
+  },
+  "createdBy": {
+    "gradle": {
+      "version": "9.9.1"
+    }
+  },
+  "variants": [
+    {
+      "name": "apiElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.version": 17,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-api"
+      },
+      "files": [
+        {
+          "name": "myotis-api-0.1.24.jar",
+          "url": "myotis-api-0.1.24.jar",
+          "size": 71731,
+          "sha512": "01fb8f7992e058d40fd1e9f0f82ffc8dd1ed31d7072b369c1f2d5f0eab3caec567c2fe7e6579ea6915e63e281600b9d5b9645d030b76786775dde3de5f9a047b",
+          "sha256": "dfb39c10306e1ee64ce366a188dd45b4ba698f4ddba8b1311572bba89cb23f3a",
+          "sha1": "b66b493b3bfe11332ac4e7d723a3e86d048939ff",
+          "md5": "84994ed1d0fdc238054f1c0babb53fde"
+        }
+      ]
+    },
+    {
+      "name": "runtimeElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.version": 17,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-runtime"
+      },
+      "files": [
+        {
+          "name": "myotis-api-0.1.24.jar",
+          "url": "myotis-api-0.1.24.jar",
+          "size": 71731,
+          "sha512": "01fb8f7992e058d40fd1e9f0f82ffc8dd1ed31d7072b369c1f2d5f0eab3caec567c2fe7e6579ea6915e63e281600b9d5b9645d030b76786775dde3de5f9a047b",
+          "sha256": "dfb39c10306e1ee64ce366a188dd45b4ba698f4ddba8b1311572bba89cb23f3a",
+          "sha1": "b66b493b3bfe11332ac4e7d723a3e86d048939ff",
+          "md5": "84994ed1d0fdc238054f1c0babb53fde"
+        }
+      ]
+    },
+    {
+      "name": "sourcesElements",
+      "attributes": {
+        "org.gradle.category": "documentation",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.docstype": "sources",
+        "org.gradle.usage": "java-runtime"
+      },
+      "files": [
+        {
+          "name": "myotis-api-0.1.24-sources.jar",
+          "url": "myotis-api-0.1.24-sources.jar",
+          "size": 67854,
+          "sha512": "bd056d38d7bf8b819e5e97a7531a62568a0f74c740508e432040e2b1aa312e10d3eaba4928cb44f4f8c39dd36f2f582668292e3fd6eaee353afcf8162701a454",
+          "sha256": "750bf6037facd47f64a62de4713985074dc4d605d894d18fee9b361566015875",
+          "sha1": "43fc3682e2e550d7bd4e027c18a1cb23859c75c0",
+          "md5": "3987fbae42b5630eea67f911874fdffe"
+        }
+      ]
+    }
+  ]
+}
