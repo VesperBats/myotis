@@ -10,7 +10,7 @@ thing looks the way it does, or explores something that does not exist yet.
 | [`guides/`](guides/) | Step-by-step instructions: using the engine library, release signing, running Myotis for Swarm Bee, the RAILGUN PoC, a dedicated Sepolia node | Yes, for the procedure; re-check versions in long-lived runbooks |
 | [`spec/`](spec/) | The language-agnostic specification of Myotis (01–05), plus the Rust port's working notes (06) and plan (07) | 01–05 yes; 06–07 are a record of how the port was done |
 | [`design-history/`](design-history/) | Designs and plans that **were built**, kept as the record of why: the log index, roost, multichain, Glamsterdam, native BLS, the Java engine's EVM and ENS phases | Partly: the design was built, but later changes are not always folded back. Check `how-it-works/` or the code |
-| [`ideas/`](ideas/) | Proposals, evaluations and research that are **not built** (or only a first slice): Base, a dApp browser, inbound connections, snap servers, state on Swarm, onion services | No. Nothing here describes shipped behaviour unless its status line says so |
+| [`ideas/`](ideas/) | Proposals, evaluations and research that are **not built** (or only a first slice): Base, Gnosis as an EEZ zone, a dApp browser, inbound connections, snap servers, state on Swarm, onion services | No. Nothing here describes shipped behaviour unless its status line says so |
 | [`reviews/`](reviews/) | Code reviews and the backlog of review follow-ups | They describe the code at the commit they name |
 | [`tour/`](tour/) | The Myotis Rust Tour: a guided reading of every Rust file, as a book (Markdown, HTML, EPUB) with its sources | It quotes the code at one pinned commit; see its README |
 
@@ -77,6 +77,7 @@ that gets built moves to `design-history/`, and its user-facing behaviour gets a
 - [base-l2-evaluation.md](ideas/base-l2-evaluation.md): Base (Coinbase's L2) on Myotis, an evaluation.
 - [dapp-browser-design.md](ideas/dapp-browser-design.md): a dApp browser and RPC interception (phase 0 built as #502).
 - [deep-block-verification.md](ideas/deep-block-verification.md): verifying any historical block with a bundled checkpoint table and a header walk, with measured peer availability.
+- [gnosis-eez.md](ideas/gnosis-eez.md): Gnosis Chain as an EEZ zone, what Myotis needs and a development setup (plan of `feature/gnosis-eez`).
 - [inbound-connections.md](ideas/inbound-connections.md): accepting inbound devp2p connections.
 - [logindex-verified-bundle-design.md](ideas/logindex-verified-bundle-design.md): downloadable log-index bundles the walker verifies (#472).
 - [react-native.md](ideas/react-native.md): a React Native bridge for Android and iOS.
