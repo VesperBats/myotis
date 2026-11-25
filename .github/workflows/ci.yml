@@ -74,6 +74,9 @@ jobs:
           python3 scripts/test_normalize_xcframework.py
           python3 scripts/test_check_pins_additive.py
           python3 scripts/test_sbom.py
+          # The merge queue's scope for the msi and the iOS framework
+          # (queue-scope.yml): a broken filter would skip a required build.
+          python3 -I scripts/test_queue_scope.py
 
       # The rustc rust/rust-toolchain.toml pins, like every Rust lane (#734).
       # Not the image's preinstalled Rust: the Gradle gate skips any toolchain
