@@ -1037,6 +1037,11 @@ const SEPOLIA_STATIC_PEERS: &[&str] = &[
     // the verified period-1422 update. The cold start with every pin unreachable
     // and the old-anchor walk from oldest-servable.properties (period 1323 to
     // 1422, 99 behind) reached SYNCED. The bootnodes seeded discv5 (26 entries).
+    // Release check for v0.1.24 (2026-11-25), anchor slot 11655680 (refreshed),
+    // period 1422: run 45597115139 (scope pins-only), 2 of 2 — both pins served
+    // the bootstrap and the verified period-1422 update. The cold start with every
+    // pin unreachable reached SYNCED; the old-anchor walk did not run in this
+    // scope. The bootnodes seeded discv5 (22 entries).
     "/ip4/188.68.32.16/tcp/9104/p2p/16Uiu2HAkvYx58piGw1oxz34CUoeTv8nNQwTwE2cZZh4jR4wVMYy6",
 ];
 

@@ -465,6 +465,9 @@ public record NetworkConfig(
             // Release check for v0.1.23 (2026-11-24), slot 11650048 (refreshed):
             // run 45432167346, 2 of 2, both cold starts SYNCED. Details in the
             // Rust twin.
+            // Release check for v0.1.24 (2026-11-25), slot 11655680 (refreshed):
+            // run 45597115139 (pins-only), 2 of 2, the dead-pins cold start
+            // SYNCED, no old-anchor walk. Details in the Rust twin.
             // Keep this list identical to SEPOLIA_STATIC_PEERS in
             // rust/myotis-net/src/sync.rs (both parity tests pin it).
             List.of(
