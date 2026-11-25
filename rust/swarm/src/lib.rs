@@ -93,6 +93,10 @@ pub const MAINNET_NETWORK_ID: u64 = 1;
 /// resolver, 1.1.1.1, 8.8.8.8 and `ns1.mainnet.ethswarm.org`: the same seven leaves, so the
 /// list is unchanged; started from them alone, the node had its first BZZ peer after 10.1 s,
 /// its first serving peer after 15.2 s and 17 serving peers (24 connections) after 20 s.
+/// Walked again for v0.1.24 (2026-11-25, release step 2) through the default resolver,
+/// 1.1.1.1 and 8.8.8.8, the root and all three regions: the same seven leaves, so the list
+/// is unchanged; started from them alone, the node had its first BZZ peer after 10.1 s, its
+/// first serving peer after 15.2 s and 17 serving peers (24 connections) after 20 s.
 /// The reader keeps no peer store
 /// ([`SwarmConfig::mainnet`]'s `peerstore_path` is `None`), so every start joins through this
 /// list; one live entry is enough, as peers then come through hive gossip. Refreshed in a
