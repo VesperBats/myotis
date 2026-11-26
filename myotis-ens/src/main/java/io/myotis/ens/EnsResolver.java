@@ -97,18 +97,52 @@ public final class EnsResolver {
             FunctionSignature.of("findResolver(bytes)");
     private static final FunctionSignature REGISTRY_V1 =
             FunctionSignature.of("REGISTRY_V1()");
+    private static final FunctionSignature GET_STATUS =
+            FunctionSignature.of("getStatus(uint256)");
+    private static final FunctionSignature GET_SUBREGISTRY =
+            FunctionSignature.of("getSubregistry(string)");
 
-    /** The ownership refusal for a name ENSv2 decides (#671; Rust {@code ENSV2_OWNERSHIP}). */
+    /** {@code IPermissionedRegistry.Status}, as an ENSv2 registry's {@code getStatus} answers it. */
+    private static final long STATUS_AVAILABLE = 0;
+    private static final long STATUS_RESERVED = 1;
+    private static final long STATUS_REGISTERED = 2;
+
+    /** What ENSv2's registries hold for a name ({@link #ensv2Walk}; Rust {@code Ensv2Walk}). */
+    private enum Ensv2Walk {
+        /** A label on the way is AVAILABLE, or REGISTERED with no subregistry below it. */
+        NOTHING,
+        /** The name or an ancestor is RESERVED: handed to v1, not migrated yet. */
+        RESERVED,
+        /** The name itself is REGISTERED in ENSv2. */
+        REGISTERED,
+        /** An answer that cannot be read, or no label to ask about. */
+        UNKNOWN
+    }
+
+    /** Who decides a name's ownership ({@link #decider}, #671; Rust {@code Decider}). */
+    private enum Decider {
+        /** The v1 registry and registrar. */
+        V1,
+        /** ENSv2, which this engine does not read: refused. */
+        ENSV2,
+        /** Nobody: ENSv2 names no resolver for the name and registers nothing for it. The v1
+         *  reads still run, and only their own "nothing" is answered; a v1 entry is stale. */
+        NOBODY
+    }
+
+    /** The ownership refusal for a name ENSv2 decides (#671; Rust {@code ENSV2_OWNERSHIP}). A
+     *  name neither ENSv2 nor v1 holds is answered as nothing on chain instead. */
     public static final String ENSV2_OWNERSHIP =
             "ENSv2 decides this name's ownership, and this engine does not read ENSv2 yet";
 
     private final EvmExecutor executor;
     private final Address registry;
-    /** Asked only whether ENSv2 decides a name ({@link #v1Decides}, for
+    /** Asked only whether ENSv2 decides a name ({@link #decider}, for
      *  {@link #resolveOwnership}); no record is read through it. Null = no ENSv2 on this
      *  tree (Genome). */
     private final Address universalResolver;
-    /** ENSv2's v1 mirror on this chain, pinned ({@link EnsAddresses#SEPOLIA_ENSV1_MIRROR});
+    /** ENSv2's v1 mirror on this chain, pinned ({@link EnsAddresses#MAINNET_ENSV1_MIRROR},
+     *  {@link EnsAddresses#SEPOLIA_ENSV1_MIRROR});
      *  null = none known, so where ENSv2 is live no name is v1's. */
     private final Address ensv1Mirror;
     /** The {@code .eth} registrar and the NameWrapper for {@link #resolveOwnership};
@@ -124,10 +158,11 @@ public final class EnsResolver {
      *  refused instead of being hashed into a tree it does not belong to. Null = any (ENS). */
     private final String requiredTld;
 
-    /** Default constructor: the mainnet contracts. */
+    /** Default constructor: the mainnet contracts, ENSv2's v1 mirror included. */
     public EnsResolver(EvmExecutor executor) {
         this(executor, EnsAddresses.MAINNET_REGISTRY, EnsAddresses.MAINNET_UNIVERSAL_RESOLVER,
-                EnsAddresses.BASE_REGISTRAR, EnsAddresses.MAINNET_NAME_WRAPPER);
+                EnsAddresses.BASE_REGISTRAR, EnsAddresses.MAINNET_NAME_WRAPPER,
+                EnsAddresses.MAINNET_ENSV1_MIRROR);
     }
 
     /**
@@ -148,7 +183,7 @@ public final class EnsResolver {
         this(executor, registry, universalResolver, baseRegistrar, nameWrapper, null);
     }
 
-    /** With the chain's ENSv2 v1 mirror too ({@link #v1Decides}); null = none known. */
+    /** With the chain's ENSv2 v1 mirror too ({@link #decider}); null = none known. */
     public EnsResolver(EvmExecutor executor, Address registry, Address universalResolver,
                        Address baseRegistrar, Address nameWrapper, Address ensv1Mirror) {
         this(executor, registry, universalResolver, baseRegistrar, nameWrapper, ensv1Mirror,
@@ -261,7 +296,8 @@ public final class EnsResolver {
         if (chainId == 1L) {
             return new EnsResolver(executor,
                     EnsAddresses.MAINNET_REGISTRY, EnsAddresses.MAINNET_UNIVERSAL_RESOLVER,
-                    EnsAddresses.BASE_REGISTRAR, EnsAddresses.MAINNET_NAME_WRAPPER);
+                    EnsAddresses.BASE_REGISTRAR, EnsAddresses.MAINNET_NAME_WRAPPER,
+                    EnsAddresses.MAINNET_ENSV1_MIRROR);
         }
         if (chainId == 11155111L) {
             return new EnsResolver(executor,
@@ -494,7 +530,9 @@ public final class EnsResolver {
      * the record reads validate and hash it ({@link DnsEncoder#encode}, {@link Namehash#of}),
      * so this read and the record reads of one input answer about the same node. A name
      * ENSv2 decides fails with {@link #ENSV2_OWNERSHIP} (#671): v1's registry and registrar
-     * would read it as unowned or name a stale holder. Rust twin: {@code resolve_ownership}.
+     * would read it as unowned or name a stale holder. A name ENSv2 registers nothing for and
+     * names no resolver for is empty when v1 holds nothing either, and refused when v1 still
+     * does (a stale entry). Rust twin: {@code resolve_ownership}.
      */
     public CompletableFuture<Optional<Ownership>> resolveOwnership(String name, BlockContext ctx) {
         // The record reads' own validation (an empty label, more than one trailing dot)
@@ -517,36 +555,121 @@ public final class EnsResolver {
             return com.jaeckel.ethp2p.core.concurrent.Futures.failedFuture(
                     new IllegalStateException("the ." + registrarTld + " registrar is not pinned for this chain"));
         }
-        CompletableFuture<Boolean> v1 = universalResolver == null
-                ? CompletableFuture.completedFuture(true)
-                : v1Decides(DnsEncoder.encode(name), ctx);
-        return v1.thenCompose(decides -> decides
-                ? readOwnership(labels, node, ctx)
-                : com.jaeckel.ethp2p.core.concurrent.Futures.<Optional<Ownership>>failedFuture(
-                        new UnsupportedOperationException(ENSV2_OWNERSHIP)));
+        CompletableFuture<Decider> who = universalResolver == null
+                ? CompletableFuture.completedFuture(Decider.V1)
+                : decider(DnsEncoder.encode(name), labels, ctx);
+        return who.thenCompose(d -> d == Decider.ENSV2
+                ? refusedOwnership()
+                : readOwnership(labels, node, ctx).thenCompose(o ->
+                        // ENSv2 holds nothing for the name, but v1 still does: a stale entry
+                        // (an expired name ENSv2 does not carry), not v1's to answer for.
+                        d == Decider.NOBODY && o.isPresent()
+                                ? refusedOwnership()
+                                : CompletableFuture.completedFuture(o)));
+    }
+
+    private static CompletableFuture<Optional<Ownership>> refusedOwnership() {
+        return com.jaeckel.ethp2p.core.concurrent.Futures.failedFuture(
+                new UnsupportedOperationException(ENSV2_OWNERSHIP));
     }
 
     /**
-     * Whether the v1 registry still decides the name {@code dnsName} encodes (#671).
-     * ENSv2 is live on a chain when its Universal Resolver names a root registry
-     * ({@code ROOT_REGISTRY()}: Sepolia since the ENSv2 beta; a revert on mainnet until
-     * activation). Where it is not, v1 decides everything. Where it is, v1 decides only a
-     * name the Universal Resolver hands to this chain's pinned v1 mirror ({@link #ensv1Mirror}),
-     * which ENSv2 sets for names not migrated yet; its {@code REGISTRY_V1()} must still name
-     * this registry. Any other answer, no resolver included, belongs to ENSv2; and where no
-     * mirror is pinned, no name is v1's. Rust twin: {@code v1_decides}.
+     * Who decides the name {@code dnsName} encodes (#671). ENSv2 is live on a chain when its
+     * Universal Resolver names a root registry ({@code ROOT_REGISTRY()}: Sepolia since the
+     * ENSv2 beta, mainnet since block 26,284,289). Where it is not, v1 decides everything.
+     * Where it is, v1 decides only a name the Universal Resolver hands to this chain's pinned
+     * v1 mirror ({@link #ensv1Mirror}), which ENSv2 sets for names not migrated yet; its
+     * {@code REGISTRY_V1()} must still name this registry, and ENSv2's registries must not
+     * hold the name as REGISTERED ({@link #ensv2Walk}): the mirror is a public contract a
+     * migrated name's owner can set as its resolver too (#938 review). A name it names no
+     * resolver for is nobody's when ENSv2's registries hold nothing for it. Every other
+     * answer belongs to ENSv2, one the Universal Resolver or the registries could not answer
+     * for included (unknown is neither v1 nor nobody). Rust twin: {@code decider}.
      */
-    private CompletableFuture<Boolean> v1Decides(byte[] dnsName, BlockContext ctx) {
+    private CompletableFuture<Decider> decider(byte[] dnsName, String[] labels, BlockContext ctx) {
         return callAddress(universalResolver, AbiEncoder.encodeCall(ROOT_REGISTRY), ctx).thenCompose(root -> {
-            if (root.isEmpty()) return CompletableFuture.completedFuture(true);
-            if (ensv1Mirror == null) return CompletableFuture.completedFuture(false);
+            if (root.isEmpty()) return CompletableFuture.completedFuture(Decider.V1);
             byte[] find = AbiEncoder.encodeCall(FIND_RESOLVER, AbiEncoder.bytes(dnsName));
-            return callAddress(universalResolver, find, ctx).thenCompose(resolver ->
-                    resolver.isEmpty() || !resolver.get().equals(ensv1Mirror)
-                            ? CompletableFuture.completedFuture(false)
-                            : callAddress(resolver.get(), AbiEncoder.encodeCall(REGISTRY_V1), ctx)
-                                    .thenApply(v1 -> v1.isPresent() && v1.get().equals(registry)));
+            return callWord(universalResolver, find, ctx).thenCompose(word -> {
+                Optional<Address> resolver = word.flatMap(EnsResolver::cleanAddress);
+                if (resolver.isEmpty()) return CompletableFuture.completedFuture(Decider.ENSV2);
+                if (resolver.get().equals(Address.ZERO)) {
+                    return ensv2Walk(root.get(), labels, ctx)
+                            .thenApply(w -> w == Ensv2Walk.NOTHING ? Decider.NOBODY : Decider.ENSV2);
+                }
+                if (ensv1Mirror == null || !resolver.get().equals(ensv1Mirror)) {
+                    return CompletableFuture.completedFuture(Decider.ENSV2);
+                }
+                return callAddress(resolver.get(), AbiEncoder.encodeCall(REGISTRY_V1), ctx).thenCompose(v1 ->
+                        !(v1.isPresent() && v1.get().equals(registry))
+                                ? CompletableFuture.completedFuture(Decider.ENSV2)
+                                // The mirror hands an unmigrated name (RESERVED) to v1, and so a
+                                // name ENSv2 registers nothing for whose resolver it inherits;
+                                // never one REGISTERED in ENSv2.
+                                : ensv2Walk(root.get(), labels, ctx).thenApply(w ->
+                                        w == Ensv2Walk.RESERVED || w == Ensv2Walk.NOTHING
+                                                ? Decider.V1 : Decider.ENSV2));
+            });
         });
+    }
+
+    /**
+     * What ENSv2's registries hold for the name {@code labels} spell (#671), walked down from
+     * {@code root} one label at a time ({@code eth}, then {@code x} for {@code x.eth}); see
+     * {@link Ensv2Walk}. Asked about the name the Universal Resolver answered for: a trailing
+     * root dot's empty label is not walked, and the root name itself (no label) is UNKNOWN.
+     * Rust twin: {@code ensv2_walk}.
+     */
+    private CompletableFuture<Ensv2Walk> ensv2Walk(Address root, String[] labels, BlockContext ctx) {
+        int top = labels[labels.length - 1].isEmpty() ? labels.length - 2 : labels.length - 1;
+        if (top < 0) return CompletableFuture.completedFuture(Ensv2Walk.UNKNOWN);
+        return ensv2Walk(root, labels, top, ctx);
+    }
+
+    /** {@link #ensv2Walk} from {@code registry}, asked about {@code labels[depth]}. */
+    private CompletableFuture<Ensv2Walk> ensv2Walk(Address registry, String[] labels, int depth, BlockContext ctx) {
+        byte[] status = AbiEncoder.encodeCall(GET_STATUS, AbiEncoder.bytes32(Namehash.labelhash(labels[depth])));
+        return callWord(registry, status, ctx).thenCompose(word -> {
+            Optional<Long> s = word.flatMap(EnsResolver::smallUint);
+            if (s.isEmpty()) return CompletableFuture.completedFuture(Ensv2Walk.UNKNOWN);
+            if (s.get() == STATUS_AVAILABLE) return CompletableFuture.completedFuture(Ensv2Walk.NOTHING);
+            if (s.get() == STATUS_RESERVED) return CompletableFuture.completedFuture(Ensv2Walk.RESERVED);
+            if (s.get() != STATUS_REGISTERED) return CompletableFuture.completedFuture(Ensv2Walk.UNKNOWN);
+            if (depth == 0) return CompletableFuture.completedFuture(Ensv2Walk.REGISTERED);
+            byte[] sub = AbiEncoder.encodeCall(GET_SUBREGISTRY, AbiEncoder.string(labels[depth]));
+            return callWord(registry, sub, ctx).thenCompose(subWord -> {
+                Optional<Address> next = subWord.flatMap(EnsResolver::cleanAddress);
+                if (next.isEmpty()) return CompletableFuture.completedFuture(Ensv2Walk.UNKNOWN);
+                if (next.get().equals(Address.ZERO)) return CompletableFuture.completedFuture(Ensv2Walk.NOTHING);
+                return ensv2Walk(next.get(), labels, depth - 1, ctx);
+            });
+        });
+    }
+
+    /** One view's raw answer; empty = a revert. Any other failure propagates. */
+    private CompletableFuture<Optional<byte[]>> callWord(Address target, byte[] calldata, BlockContext ctx) {
+        return executor.callView(target, calldata, ctx).handle((res, err) -> {
+            if (err == null) return Optional.ofNullable(res);
+            if (isRevert(err)) return Optional.<byte[]>empty();
+            throw new CompletionException(unwrap(err));
+        });
+    }
+
+    /** The first word as an address, zero included; empty when it is short or not a clean
+     *  address (non-zero upper bytes). */
+    private static Optional<Address> cleanAddress(byte[] result) {
+        if (result.length < 32) return Optional.empty();
+        for (int i = 0; i < 12; i++) {
+            if (result[i] != 0) return Optional.empty();
+        }
+        return Optional.of(AbiDecoder.address(result, 0));
+    }
+
+    /** The first word as a {@code long}, zero included; empty when short or larger. */
+    private static Optional<Long> smallUint(byte[] result) {
+        if (result.length < 32) return Optional.empty();
+        BigInteger v = AbiDecoder.uint256(result, 0);
+        return v.bitLength() < 64 ? Optional.of(v.longValue()) : Optional.empty();
     }
 
     /** The v1 reads of {@link #resolveOwnership}, once v1 is known to decide the name. */

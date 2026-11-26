@@ -19,6 +19,17 @@ its trust anchors and release checks.
 
 ## [Unreleased]
 
+### Fixed
+
+- ENS ownership on mainnet: ENSv2 has been live there since block 26,284,289
+  (2026-10-27), and every mainnet name's ownership was refused since ("ENSv2
+  decides this name's ownership…"). Both engines now pin mainnet's ENSv1
+  mirror, so a name not migrated to ENSv2 (vitalik.eth) shows its v1 owner
+  again, and a name ENSv2 names no resolver for (its own or a parent's) and
+  that neither ENSv2's registries nor v1 hold reads as nothing on chain
+  instead of the refusal. Names registered in ENSv2 stay refused until the
+  engine reads ENSv2's registries (#937, #671).
+
 ## [0.1.25] - 2026-11-26
 
 ### Added

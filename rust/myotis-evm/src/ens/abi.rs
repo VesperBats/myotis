@@ -338,6 +338,10 @@ mod tests {
         assert_eq!(selector("findResolver(bytes)"), [0xa1, 0xcb, 0xcb, 0xaf]);
         assert_eq!(selector("ROOT_REGISTRY()"), [0xc9, 0x2c, 0xc4, 0x9a]);
         assert_eq!(selector("REGISTRY_V1()"), [0xe3, 0x70, 0xec, 0xbe]);
+        // ENSv2 registry reads (#938): both answered by mainnet's RootRegistry and
+        // ETHRegistry under these ids (2026-11-26).
+        assert_eq!(selector("getStatus(uint256)"), [0x5c, 0x62, 0x2a, 0x0e]);
+        assert_eq!(selector("getSubregistry(string)"), [0x35, 0xaf, 0x62, 0x16]);
         // `cast calldata 'findResolver(bytes)' <dns("myotis.eth")>`, byte for byte.
         let dns = b"\x06myotis\x03eth\x00";
         let enc = encode_call_bytes("findResolver(bytes)", dns);
