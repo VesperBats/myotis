@@ -1,6 +1,10 @@
 //! The EEZ settlement anchor: an L2 block hash read from its registry on L1.
 //! **DEV-ONLY** (owner's decision, 2026-11-26; docs/ideas/gnosis-eez.md §2,
-//! §4). Nothing here is wired into a chain, a host or a wallet read.
+//! §4). Nothing here is wired into a chain, a host or a wallet read, and the
+//! compiler keeps it that way: the module exists only with the `eez-dev`
+//! feature, which this crate turns on only through its own dev-dependency
+//! (as `fixture-recorder`), so tests and examples see it and no release build
+//! does (owner's decision, 2026-11-26, on the review of #932).
 //!
 //! An EEZ zone (Gnosis Chain after its migration, the RollupX networks today)
 //! has no sync committee. What it has is its registry on L1, which keeps
@@ -36,8 +40,10 @@
 use std::sync::Mutex;
 
 use myotis_core::keccak::keccak256;
+use myotis_core::header::BlockHeader;
 use myotis_core::trie::{
-    decode_account_leaf, decode_storage_leaf, verify_proof, ProofResult, EMPTY_TRIE_ROOT,
+    decode_account_leaf, decode_storage_leaf, verify_proof, ProofResult, EMPTY_CODE_HASH,
+    EMPTY_TRIE_ROOT,
 };
 use myotis_core::CoreError;
 
@@ -128,9 +134,14 @@ impl SettledHash {
 /// `verify_storage_proof` return them from a snap answer.
 ///
 /// `Ok(None)`: the slot is provably zero — the rollup is not registered, or
-/// nothing has settled. `Err`: a proof that does not verify, or a registry
-/// with no account at that root (a wrong address or the wrong L1), which is a
-/// configuration error, never "nothing settled".
+/// nothing has settled. `Err`: a proof that does not verify, or no contract
+/// at the registry address (no account, or one without code): a configuration
+/// error, never "nothing settled". What is NOT checked here: that the address
+/// holds the registry rather than another contract, and that `l1.state_root`
+/// is a root of the right chain (the EEZL2 proxy on the L2 sits at the same
+/// address by design). Both are the caller's to vouch for, as [`L1State`]
+/// says: a contract that is not the registry reads as `Ok(None)` or as
+/// whatever it keeps in that slot.
 pub fn settled_l2_hash(
     l1: &L1State,
     registry: &Registry,
@@ -150,6 +161,11 @@ pub fn settled_l2_hash(
             )))
         }
     };
+    if account.code_hash == EMPTY_CODE_HASH {
+        return Err(CoreError(
+            "eez registry: the registry address holds no code under this L1 state root".into(),
+        ));
+    }
     if account.storage_root == EMPTY_TRIE_ROOT {
         return Ok(None);
     }
@@ -163,9 +179,10 @@ pub fn settled_l2_hash(
             )))
         }
     };
-    // `decode_storage_leaf` refuses more than 32 bytes and gives the minimal
-    // big-endian form, so a leading-zero hash comes back shorter: left-pad.
-    if value.iter().all(|b| *b == 0) {
+    // `decode_storage_leaf` refuses more than 32 bytes and a leading zero, and
+    // gives the minimal big-endian form: zero is the empty value, and a hash
+    // with leading zero bytes comes back shorter, so left-pad.
+    if value.is_empty() {
         return Ok(None);
     }
     let mut hash = [0u8; 32];
@@ -221,7 +238,8 @@ pub enum Resolve {
     Adopted,
     /// No hash is pending, or this header is not the one pending: nothing changed.
     NotPending,
-    /// The header's RLP does not hash to its own `hash` field: nothing changed.
+    /// The header's RLP does not hash to its own `hash` field, or does not
+    /// decode: nothing changed.
     HashMismatch,
     /// The header IS the pending hash, but not above the settled block (a
     /// lower number, or the same number on another hash) although it was read
@@ -232,11 +250,11 @@ pub enum Resolve {
 /// A contradiction between two reads of the registry. Finalized L1 state
 /// neither disagrees with itself nor moves back, so each of these means a
 /// wrong input (a root paired with the wrong slot, a non-finalized read) or a
-/// registry that did what it must not. Sticky: the first one is kept. The
-/// anchor goes on working, and a reader must refuse what rests on it while
-/// [`SettledAnchor::alarm`] is set; what an exposed integration does beyond
-/// that (park, re-anchor, tell the user) is not decided, and the anchor stays
-/// dev-only until it is (docs/ideas/gnosis-eez.md §4).
+/// registry that did what it must not. Sticky: the first one is kept. From
+/// then on [`SettledAnchor::settled`] answers with the alarm instead of a
+/// block; what an exposed integration does beyond that (park, re-anchor,
+/// tell the user) is not decided, and the anchor stays dev-only until it is
+/// (docs/ideas/gnosis-eez.md §4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Alarm {
     /// Two different hashes for one L1 slot.
@@ -355,11 +373,16 @@ impl SettledAnchor {
     /// Offer an L2 header fetched by the pending hash. Adopted only if the
     /// keccak of ITS RAW RLP is the pending hash (recomputed here, not taken
     /// from the decoder's `hash` field alone) and it is above the settled block.
+    /// The adopted fields are decoded here from those same hashed bytes, not
+    /// taken from the separately held `header.header`.
     pub fn resolve_header(&self, header: &VerifiedHeader) -> Resolve {
         let hash = keccak256(&header.raw_rlp);
         if hash != header.hash {
             return Resolve::HashMismatch;
         }
+        let Ok(decoded) = BlockHeader::decode(&header.raw_rlp) else {
+            return Resolve::HashMismatch;
+        };
         let mut inner = self.inner.lock().expect("settled anchor mutex");
         let Some((l1_slot, pending)) = inner.pending else {
             return Resolve::NotPending;
@@ -368,7 +391,7 @@ impl SettledAnchor {
             return Resolve::NotPending;
         }
         inner.pending = None;
-        let number = header.header.number;
+        let number = decoded.number;
         if let Some(settled) = inner.settled {
             if number <= settled.number {
                 inner.raise(Alarm::Regressed {
@@ -386,16 +409,22 @@ impl SettledAnchor {
             l1_slot,
             number,
             hash,
-            state_root: header.header.state_root,
-            timestamp: header.header.timestamp,
+            state_root: decoded.state_root,
+            timestamp: decoded.timestamp,
             basis: TrustBasis::RegistrySettlement,
         });
         Resolve::Adopted
     }
 
-    /// The settled block, once one was adopted. Check [`Self::alarm`] first.
-    pub fn settled(&self) -> Option<SettledBlock> {
-        self.inner.lock().expect("settled anchor mutex").settled
+    /// The settled block, once one was adopted, or the alarm that forbids
+    /// resting on it: one lock, so a block is never handed out under an
+    /// alarm raised before the answer.
+    pub fn settled(&self) -> Result<Option<SettledBlock>, Alarm> {
+        let inner = self.inner.lock().expect("settled anchor mutex");
+        match inner.alarm {
+            Some(alarm) => Err(alarm),
+            None => Ok(inner.settled),
+        }
     }
 
     /// The first contradiction seen, if any (sticky).
@@ -489,6 +518,16 @@ mod tests {
         verified(vector().l2_header_rlp)
     }
 
+    /// The settled block of an anchor with no alarm.
+    fn block(anchor: &SettledAnchor) -> SettledBlock {
+        anchor.settled().expect("no alarm").expect("a settled block")
+    }
+
+    /// The settled block an alarmed anchor still keeps (and no longer hands out).
+    fn kept(anchor: &SettledAnchor) -> SettledBlock {
+        anchor.inner.lock().unwrap().settled.expect("a settled block")
+    }
+
     fn at(l1_slot: u64, hash: [u8; 32]) -> SettledHash {
         SettledHash { l1_slot, hash }
     }
@@ -564,7 +603,7 @@ mod tests {
         assert_eq!(anchor.resolve_header(&header), Resolve::Adopted);
         assert_eq!(anchor.pending_hash(), None);
         assert_eq!(
-            anchor.settled().unwrap(),
+            block(&anchor),
             SettledBlock {
                 l1_slot: 100,
                 number: v.l2_block_number,
@@ -639,7 +678,7 @@ mod tests {
         forged.raw_rlp[40] ^= 1;
         assert_eq!(anchor.resolve_header(&forged), Resolve::HashMismatch);
         assert_eq!(anchor.pending_hash(), Some(v.l2_block_hash));
-        assert_eq!(anchor.settled(), None);
+        assert_eq!(anchor.settled(), Ok(None));
     }
 
     #[test]
@@ -649,7 +688,7 @@ mod tests {
         anchor.note_settled_hash(at(1, [0x22; 32]));
         assert_eq!(anchor.resolve_header(&l2_header()), Resolve::NotPending);
         assert_eq!(anchor.pending_hash(), Some([0x22; 32]));
-        assert_eq!(anchor.settled(), None);
+        assert_eq!(anchor.settled(), Ok(None));
     }
 
     #[test]
@@ -665,7 +704,7 @@ mod tests {
             anchor.note_settled_hash(at(9, v.l2_block_hash)),
             Note::Ignored
         );
-        assert_eq!(anchor.settled().unwrap().l1_slot, 10);
+        assert_eq!(block(&anchor).l1_slot, 10);
         assert_eq!(anchor.alarm(), None);
     }
 
@@ -679,7 +718,7 @@ mod tests {
             anchor.note_settled_hash(at(25, v.l2_block_hash)),
             Note::Refreshed
         );
-        assert_eq!(anchor.settled().unwrap().l1_slot, 25);
+        assert_eq!(block(&anchor).l1_slot, 25);
         assert_eq!(anchor.pending_hash(), None);
         assert_eq!(anchor.alarm(), None);
     }
@@ -745,7 +784,8 @@ mod tests {
                 offered: v.l2_block_number
             }
         );
-        assert_eq!(anchor.settled().unwrap().hash, [0x55; 32]);
+        assert_eq!(kept(&anchor).hash, [0x55; 32]);
+        assert!(matches!(anchor.settled(), Err(Alarm::Regressed { .. })));
         assert_eq!(anchor.pending_hash(), None);
         assert_eq!(
             anchor.alarm(),
@@ -770,7 +810,8 @@ mod tests {
                 offered: v.l2_block_number
             }
         );
-        assert_eq!(anchor.settled().unwrap().hash, [0x66; 32]);
+        assert_eq!(kept(&anchor).hash, [0x66; 32]);
+        assert!(anchor.settled().is_err());
         assert!(anchor.alarm().is_some());
     }
 
@@ -800,56 +841,111 @@ mod tests {
             Note::Pending
         );
         assert_eq!(anchor.resolve_header(&l2_header()), Resolve::Adopted);
-        assert_eq!(anchor.settled().unwrap().number, v.l2_block_number);
-        assert_eq!(anchor.settled().unwrap().l1_slot, 11);
+        assert_eq!(block(&anchor).number, v.l2_block_number);
+        assert_eq!(block(&anchor).l1_slot, 11);
         assert_eq!(anchor.alarm(), None);
     }
 
-    /// The dev-only gate (owner's decision, 2026-11-26; docs/ideas/gnosis-eez.md
-    /// §4): no Rust source in the workspace outside this file, `tests/` and
-    /// `examples/` refers to this module, so nothing reaches `config_for`, the
-    /// catalogue, UniFFI, the C ABI or `myotis-rpcd` through it. The hosts
-    /// (Kotlin, Java, Swift) can only reach Rust through the engine's FFI,
-    /// which this scan covers. Widening the gate is the owner's call.
+    /// A one-leaf trie holding `value` (already RLP) under `keccak(key)`: the
+    /// leaf node, hex-prefixed with the full 64-nibble path (flag `0x20`), is
+    /// the whole proof and its keccak the root.
+    fn one_leaf(key: &[u8], value_rlp: Vec<u8>) -> ([u8; 32], Vec<Vec<u8>>) {
+        use myotis_core::rlp::{encode, Item};
+        let mut path = vec![0x20];
+        path.extend_from_slice(&keccak256(key));
+        let node = encode(&Item::List(vec![Item::Bytes(path), Item::Bytes(value_rlp)]));
+        (keccak256(&node), vec![node])
+    }
+
+    fn account_rlp(storage_root: [u8; 32], code_hash: [u8; 32]) -> Vec<u8> {
+        use myotis_core::rlp::{encode, Item};
+        encode(&Item::List(vec![
+            Item::Bytes(vec![1]),
+            Item::Bytes(Vec::new()),
+            Item::Bytes(storage_root.to_vec()),
+            Item::Bytes(code_hash.to_vec()),
+        ]))
+    }
+
+    fn storage_rlp(value: &[u8]) -> Vec<u8> {
+        myotis_core::rlp::encode(&myotis_core::rlp::Item::Bytes(value.to_vec()))
+    }
+
+    const REGISTRY: Registry = Registry { address: [0x4b; 20], rollup_id: 2 };
+
+    /// A state with the registry at `storage` (`None`: an empty storage trie)
+    /// and code `code_hash`; returns the L1 state and both proofs.
+    fn synthetic(
+        storage: Option<(&[u8; 32], &[u8])>,
+        code_hash: [u8; 32],
+    ) -> (L1State, Vec<Vec<u8>>, Vec<Vec<u8>>) {
+        let (storage_root, storage_proof) = match storage {
+            Some((slot, value)) => one_leaf(slot, storage_rlp(value)),
+            None => (EMPTY_TRIE_ROOT, Vec::new()),
+        };
+        let (state_root, account_proof) = one_leaf(&REGISTRY.address, account_rlp(storage_root, code_hash));
+        (L1State { slot: 7, state_root }, account_proof, storage_proof)
+    }
+
     #[test]
-    fn dev_only_gate_no_shipped_code_refers_to_this_module() {
-        let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .unwrap();
-        let this = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/el/eez.rs");
-        let needles = [
-            "el::eez",
-            "super::eez",
-            "eez::{",
-            "SettledAnchor",
-            "settled_l2_hash",
-            "SettledHash",
-        ];
-        let mut offenders = Vec::new();
-        let mut stack = vec![workspace.to_path_buf()];
-        while let Some(dir) = stack.pop() {
-            for entry in std::fs::read_dir(&dir).unwrap().flatten() {
-                let path = entry.path();
-                let name = entry.file_name().to_string_lossy().into_owned();
-                if path.is_dir() {
-                    if !["target", "vendor", "testdata", "examples", "tests", ".git"]
-                        .contains(&name.as_str())
-                    {
-                        stack.push(path);
-                    }
-                } else if name.ends_with(".rs") && path != this {
-                    let text = std::fs::read_to_string(&path).unwrap_or_default();
-                    for needle in needles {
-                        if text.contains(needle) {
-                            offenders.push(format!("{} ({needle})", path.display()));
-                        }
-                    }
-                }
-            }
-        }
-        assert!(
-            offenders.is_empty(),
-            "the dev-only EEZ anchor is referred to from shipped code: {offenders:?}"
-        );
+    fn a_hash_with_a_leading_zero_byte_is_left_padded() {
+        let mut hash = [0x5a; 32];
+        hash[0] = 0;
+        let slot = REGISTRY.root_slot();
+        // The leaf keeps the minimal form: 31 bytes.
+        let (l1, account, storage) = synthetic(Some((&slot, &hash[1..])), [0xc0; 32]);
+        let got = settled_l2_hash(&l1, &REGISTRY, &account, &storage).unwrap();
+        assert_eq!(got, Some(at(7, hash)));
+    }
+
+    #[test]
+    fn an_absent_slot_is_unsettled() {
+        // The storage trie holds another slot: an exclusion proof for ours.
+        let other = root_slot(9);
+        let (l1, account, storage) = synthetic(Some((&other, &[0x11; 32])), [0xc0; 32]);
+        assert_eq!(settled_l2_hash(&l1, &REGISTRY, &account, &storage).unwrap(), None);
+    }
+
+    #[test]
+    fn an_empty_storage_trie_is_unsettled() {
+        let (l1, account, storage) = synthetic(None, [0xc0; 32]);
+        assert_eq!(settled_l2_hash(&l1, &REGISTRY, &account, &storage).unwrap(), None);
+    }
+
+    #[test]
+    fn a_registry_address_without_code_is_an_error() {
+        let slot = REGISTRY.root_slot();
+        let (l1, account, storage) = synthetic(Some((&slot, &[0x11; 32])), EMPTY_CODE_HASH);
+        assert!(settled_l2_hash(&l1, &REGISTRY, &account, &storage).is_err());
+        let (l1, account, storage) = synthetic(None, EMPTY_CODE_HASH);
+        assert!(settled_l2_hash(&l1, &REGISTRY, &account, &storage).is_err());
+    }
+
+    #[test]
+    fn an_alarm_withholds_the_settled_block() {
+        let v = vector();
+        let anchor = SettledAnchor::new();
+        anchor.note_settled_hash(at(10, v.l2_block_hash));
+        anchor.resolve_header(&l2_header());
+        assert!(anchor.settled().is_ok());
+        anchor.note_settled_hash(at(10, [0xee; 32]));
+        let alarm = anchor.alarm().expect("conflict");
+        assert_eq!(anchor.settled(), Err(alarm));
+    }
+
+    #[test]
+    fn the_adopted_fields_come_from_the_hashed_bytes() {
+        // A header whose decoded fields were altered after decoding: the
+        // keccak still matches its raw RLP, and the anchor must adopt what
+        // those bytes say, not the altered fields.
+        let v = vector();
+        let anchor = SettledAnchor::new();
+        anchor.note_settled_hash(at(10, v.l2_block_hash));
+        let mut header = l2_header();
+        header.header.state_root = [0x99; 32];
+        header.header.number += 1_000;
+        assert_eq!(anchor.resolve_header(&header), Resolve::Adopted);
+        assert_eq!(block(&anchor).state_root, v.l2_state_root);
+        assert_eq!(block(&anchor).number, v.l2_block_number);
     }
 }
