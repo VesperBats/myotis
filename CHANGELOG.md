@@ -19,6 +19,8 @@ its trust anchors and release checks.
 
 ## [Unreleased]
 
+## [0.1.25] - 2026-11-26
+
 ### Added
 
 - Address history: the settings take an importer key per chain,
@@ -28,7 +30,7 @@ its trust anchors and release checks.
   `-32602`, for that chain only. `"importer"` (one key for every chain) is
   unchanged; both at once are refused, and so is a malformed chain id or key,
   or a chain id or setting given twice. The daemon and `myotis-rpcd` log at
-  start the importer they trust on each chain.
+  start the importer they trust on each chain (#933).
 - Deep blocks on Gnosis Chain: the bundled checkpoint table (D1) now covers
   Gnosis Chain too (owner's decision, 2026-11-25), so a block or its receipts
   deeper than the 512-block window verifies there as on mainnet, and the
@@ -41,7 +43,12 @@ its trust anchors and release checks.
 
 ### Changed
 
-- Engine ABI 62 (0.1.24 shipped 61): the per-chain importer keys.
+- Engine ABI 62 (0.1.24 shipped 61): the per-chain importer keys (#933).
+- Trust anchors: the embedded checkpoints of mainnet, Gnosis, Sepolia and
+  Chiado moved to 2026-11-26 (mainnet slot 15,737,664, Gnosis slot
+  31,336,704, Sepolia slot 11,661,888, Chiado slot 26,056,176) in the Java and
+  Rust engines, and mainnet's in the Go engine too. The mainnet checkpoint
+  table extends to block 26,497,669, cross-checked against a second node.
 
 ## [0.1.24] - 2026-11-25
 
@@ -794,7 +801,8 @@ MetaMask; ENS with CCIP-Read; mainnet and Gnosis Chain; the Android app, the
 shared Compose Multiplatform UI and the macOS dmg; and `:myotis-api`, the
 engine contract (#1 to #123).
 
-[Unreleased]: https://github.com/biafra23/myotis/compare/v0.1.24...HEAD
+[Unreleased]: https://github.com/biafra23/myotis/compare/v0.1.25...HEAD
+[0.1.25]: https://github.com/biafra23/myotis/compare/v0.1.24...v0.1.25
 [0.1.24]: https://github.com/biafra23/myotis/compare/v0.1.23...v0.1.24
 [0.1.23]: https://github.com/biafra23/myotis/compare/v0.1.22...v0.1.23
 [0.1.22]: https://github.com/biafra23/myotis/compare/v0.1.21...v0.1.22
