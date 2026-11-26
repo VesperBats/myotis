@@ -30,7 +30,7 @@ public final class EnsAddresses {
     /**
      * ENS's Universal Resolver proxy, one address on mainnet and Sepolia; its
      * {@code ROOT_REGISTRY()} answers where ENSv2 is live (Sepolia since the ENSv2
-     * beta) and reverts where it is not (mainnet until activation).
+     * beta, mainnet since block 26,284,289) and reverts where it is not.
      */
     public static final Address UNIVERSAL_RESOLVER =
             Address.fromHex("0xeEeEEEeE14D718C2B47D9923Deab1335E144EeEe");
@@ -52,6 +52,15 @@ public final class EnsAddresses {
      *  address on mainnet and Sepolia (verified against both chains' {@code ens()}). */
     public static final Address BASE_REGISTRAR =
             Address.fromHex("0x57f1887a8BF19b14fC0dF6Fd9B2acc9Af147eA85");
+
+    /**
+     * Mainnet's ENSv2 v1 mirror ({@code ENSV1Resolver}), pinned like
+     * {@link #SEPOLIA_ENSV1_MIRROR}. ENSv2 is live on mainnet since block 26,284,289; this is
+     * the address ENS's deployments page lists, the resolver ENSv2 names for every unmigrated
+     * name probed, and its {@code REGISTRY_V1()} is the v1 registry (2026-11-26).
+     */
+    public static final Address MAINNET_ENSV1_MIRROR =
+            Address.fromHex("0x394d8eb4a4fdf599384deab25f31d111d755c398");
 
     /** The NameWrapper a wrapped name's registry owner points at; its
      *  {@code ownerOf(uint256(node))} is the user behind it. */
@@ -75,7 +84,7 @@ public final class EnsAddresses {
      * not migrated yet. Pinned, not recognised by its {@code REGISTRY_V1()} getter alone: a
      * name's ENSv2 owner sets its resolver and could deploy one that answers that getter
      * too (#672 review). From ENS's deployments page, and the resolver ENSv2 names for every
-     * unmigrated name probed (2026-10-19). Mainnet has none pinned until ENSv2 activates.
+     * unmigrated name probed (2026-10-19).
      */
     public static final Address SEPOLIA_ENSV1_MIRROR =
             Address.fromHex("0x322B7581cA210a69c6D0e0D7c88a7688D2789Cb0");

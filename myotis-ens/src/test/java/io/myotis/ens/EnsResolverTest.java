@@ -163,13 +163,16 @@ class EnsResolverTest {
 
     @Test
     void theEnsv2PinsMatchTheRustEngine() {
-        // Byte-for-byte rust/myotis-evm's UNIVERSAL_RESOLVER and ensv1_mirror(11155111).
+        // Byte-for-byte rust/myotis-evm's UNIVERSAL_RESOLVER, ensv1_mirror(11155111) and
+        // ensv1_mirror(1).
         // A typo in the Universal Resolver fails OPEN (a codeless account reads as "no
         // ENSv2 root"), so both engines pin the same lowercase hex (#672 review).
         assertEquals("0xeeeeeeee14d718c2b47d9923deab1335e144eeee",
                 EnsAddresses.UNIVERSAL_RESOLVER.toHex().toLowerCase(java.util.Locale.ROOT));
         assertEquals("0x322b7581ca210a69c6d0e0d7c88a7688d2789cb0",
                 EnsAddresses.SEPOLIA_ENSV1_MIRROR.toHex().toLowerCase(java.util.Locale.ROOT));
+        assertEquals("0x394d8eb4a4fdf599384deab25f31d111d755c398",
+                EnsAddresses.MAINNET_ENSV1_MIRROR.toHex().toLowerCase(java.util.Locale.ROOT));
     }
 
     @Test
@@ -182,7 +185,8 @@ class EnsResolverTest {
 
     @Test
     void whereEnsv2IsLiveButNoMirrorIsPinnedNoNameIsV1s() {
-        // Mainnet right after activation: even the genuine mirror is not taken as v1's word.
+        // A chain without a pinned mirror (mainnet between activation and its pin): even
+        // the genuine mirror is not taken as v1's word.
         var mock = new MockExecutor();
         ensv2Resolver(mock, "ens.eth", MIRROR);
         var unpinned = new EnsResolver(mock, REGISTRY, UR, BASE_REGISTRAR, NAME_WRAPPER);
@@ -200,12 +204,117 @@ class EnsResolverTest {
         assertEnsv2Refusal(resolver.resolveOwnership("ens.eth", ctx()));
     }
 
+    /** ENSv2's {@code .eth} registry, the root's subregistry for {@code eth}. */
+    private static final Address ETH_REGISTRY_V2 = Address.fromHex("0x" + "f6".repeat(20));
+
+    /**
+     * ENSv2's registries for {@code label.eth}: the root answers {@code eth} REGISTERED with
+     * {@link #ETH_REGISTRY_V2} below it, which answers {@code label} with {@code status}
+     * (null = a revert) and no subregistry.
+     */
+    private static void v2Registries(MockExecutor mock, String label, Long status) {
+        var getStatus = FunctionSignature.of("getStatus(uint256)");
+        var getSub = FunctionSignature.of("getSubregistry(string)");
+        mock.respond(ROOT_V2, AbiEncoder.encodeCall(getStatus, AbiEncoder.bytes32(Namehash.labelhash("eth"))),
+                encodeUint(2L));
+        mock.respond(ROOT_V2, AbiEncoder.encodeCall(getSub, AbiEncoder.string("eth")), encodeAddress(ETH_REGISTRY_V2));
+        byte[] leaf = AbiEncoder.encodeCall(getStatus, AbiEncoder.bytes32(Namehash.labelhash(label)));
+        if (status == null) mock.revertOn(ETH_REGISTRY_V2, leaf, new byte[0]);
+        else mock.respond(ETH_REGISTRY_V2, leaf, encodeUint(status));
+        mock.respond(ETH_REGISTRY_V2, AbiEncoder.encodeCall(getSub, AbiEncoder.string(label)),
+                encodeAddress(Address.ZERO));
+    }
+
+    /** v1 holds nothing for {@code name} ({@code label.eth}, or a subname when label is null). */
+    private static void v1Empty(MockExecutor mock, String name, String label) {
+        mock.respond(REGISTRY, registryCall("owner(bytes32)", name), encodeAddress(Address.ZERO));
+        mock.respond(REGISTRY, registryCall("resolver(bytes32)", name), encodeAddress(Address.ZERO));
+        if (label != null) {
+            mock.revertOn(BASE_REGISTRAR, registrarCall("ownerOf(uint256)", label), new byte[0]);
+            mock.respond(BASE_REGISTRAR, registrarCall("nameExpires(uint256)", label), encodeUint(0L));
+        }
+    }
+
     @Test
-    void aStaleV1EntryEnsv2KnowsNoResolverForIsRefused() {
-        // alice.eth on Sepolia: expired, still holding a v1 resolver, unknown to ENSv2.
+    void aNameNeitherEnsv2NorV1HoldsIsNothingOnChain() throws Exception {
+        // streamonswarm.eth on mainnet: AVAILABLE in ENSv2's .eth registry, no resolver
+        // named, nothing in v1: nothing on chain, not a refusal (Rust twin of the same name).
         var mock = new MockExecutor();
+        v2Registries(mock, "nobody", 0L);
+        v1Empty(mock, "nobody.eth", "nobody");
+        assertTrue(ensv2Resolver(mock, "nobody.eth", Address.ZERO)
+                .resolveOwnership("nobody.eth", ctx()).get().isEmpty());
+    }
+
+    @Test
+    void aStaleV1EntryEnsv2HoldsNothingForIsRefused() {
+        // alice.eth on Sepolia: expired, still holding a v1 resolver, unknown to ENSv2.
+        // v1's answer is stale, and "nothing" would contradict the v1 registry.
+        var mock = new MockExecutor();
+        v2Registries(mock, "alice", 0L);
+        mock.respond(REGISTRY, registryCall("owner(bytes32)", "alice.eth"), encodeAddress(USER));
+        mock.respond(REGISTRY, registryCall("resolver(bytes32)", "alice.eth"), encodeAddress(PUBLIC_RESOLVER));
+        mock.revertOn(BASE_REGISTRAR, registrarCall("ownerOf(uint256)", "alice"), new byte[0]);
+        mock.respond(BASE_REGISTRAR, registrarCall("nameExpires(uint256)", "alice"), encodeUint(1_785_054_756L));
+        mock.respond(BASE_REGISTRAR, gracePeriodCall(), encodeUint(7_776_000L));
         assertEnsv2Refusal(ensv2Resolver(mock, "alice.eth", Address.ZERO)
                 .resolveOwnership("alice.eth", ctx()));
+    }
+
+    @Test
+    void aNameEnsv2HoldsWithoutAResolverIsRefusedBeforeAnyV1Read() {
+        // REGISTERED, RESERVED, a status outside the enum, or one that cannot be read:
+        // something is (or may be) there. No v1 call is programmed.
+        for (Long status : new Long[] {2L, 1L, 7L, null}) {
+            var mock = new MockExecutor();
+            v2Registries(mock, "taken", status);
+            assertEnsv2Refusal(ensv2Resolver(mock, "taken.eth", Address.ZERO)
+                    .resolveOwnership("taken.eth", ctx()));
+        }
+    }
+
+    @Test
+    void aSubnameBelowARegisteredNameWithoutASubregistryIsNothing() throws Exception {
+        // sub.taken.eth: taken.eth is REGISTERED in ENSv2 but has no subregistry.
+        var mock = new MockExecutor();
+        v2Registries(mock, "taken", 2L);
+        v1Empty(mock, "sub.taken.eth", null);
+        assertTrue(ensv2Resolver(mock, "sub.taken.eth", Address.ZERO)
+                .resolveOwnership("sub.taken.eth", ctx()).get().isEmpty());
+    }
+
+    @Test
+    void aUniversalResolverThatCannotWalkTheNameIsNotNothing() {
+        // A reverting findResolver: which resolver ENSv2 names is unknown; no registry is
+        // asked (none is programmed) and the read is refused.
+        var mock = new MockExecutor();
+        mock.respond(UR, AbiEncoder.encodeCall(FunctionSignature.of("ROOT_REGISTRY()")), encodeAddress(ROOT_V2));
+        mock.revertOn(UR, AbiEncoder.encodeCall(FunctionSignature.of("findResolver(bytes)"),
+                AbiEncoder.bytes(DnsEncoder.encode("nobody.eth"))), new byte[0]);
+        assertEnsv2Refusal(new EnsResolver(mock, REGISTRY, UR, BASE_REGISTRAR, NAME_WRAPPER, MIRROR)
+                .resolveOwnership("nobody.eth", ctx()));
+    }
+
+    @Test
+    void aMainnetNameEnsv2HandsToTheMainnetMirrorKeepsItsV1Ownership() throws Exception {
+        // vitalik.eth on mainnet (RESERVED in ENSv2): forChainId(1) pins mainnet's mirror.
+        var mock = new MockExecutor();
+        Address mainnetMirror = EnsAddresses.MAINNET_ENSV1_MIRROR;
+        mock.respond(UR, AbiEncoder.encodeCall(FunctionSignature.of("ROOT_REGISTRY()")), encodeAddress(ROOT_V2));
+        mock.respond(UR, AbiEncoder.encodeCall(FunctionSignature.of("findResolver(bytes)"),
+                        AbiEncoder.bytes(DnsEncoder.encode("vitalik.eth"))),
+                AbiEncoder.encodeRaw(AbiEncoder.address(mainnetMirror), AbiEncoder.bytes32(new byte[32]),
+                        AbiEncoder.uint256(0)));
+        mock.respond(mainnetMirror, AbiEncoder.encodeCall(FunctionSignature.of("REGISTRY_V1()")),
+                encodeAddress(EnsAddresses.MAINNET_REGISTRY));
+        Address registry = EnsAddresses.MAINNET_REGISTRY;
+        mock.respond(registry, registryCall("owner(bytes32)", "vitalik.eth"), encodeAddress(USER));
+        mock.respond(registry, registryCall("resolver(bytes32)", "vitalik.eth"), encodeAddress(PUBLIC_RESOLVER));
+        mock.respond(BASE_REGISTRAR, registrarCall("ownerOf(uint256)", "vitalik"), encodeAddress(USER));
+        mock.respond(BASE_REGISTRAR, registrarCall("nameExpires(uint256)", "vitalik"), encodeUint(1_823_155_031L));
+        mock.respond(BASE_REGISTRAR, gracePeriodCall(), encodeUint(7_776_000L));
+        var o = EnsResolver.forChainId(mock, 1L).resolveOwnership("vitalik.eth", ctx()).get().orElseThrow();
+        assertEquals(USER, o.registrant());
     }
 
     @Test
