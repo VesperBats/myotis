@@ -20,8 +20,11 @@
   snapshot, the JDK / rustup / Android command-line tools / Go by SHA-256, and
   rustc, the NDK, build-tools and cargo-ndk at the versions the build pins,
   which `build.sh` reads from their one source each (`.java-version`,
-  `rust/rust-toolchain.toml`, `gradle/libs.versions.toml`, `go/go.mod`). Bumping the JDK
-  therefore also moves `JDK_VERSION` / `JDK_BUILD` / `JDK_SHA256` in
+  `rust/rust-toolchain.toml`, `gradle/libs.versions.toml`, `go/go.mod`). `.java-version`
+  names the release and its build (`21.0.13+9`), so that setup-java installs
+  exactly that build on every runner, never another one a runner image caches.
+  Bumping the JDK, or moving to a rebuild of the same release, therefore also
+  moves `JDK_VERSION` / `JDK_BUILD` / `JDK_SHA256` in
   `docker/builder/pins.env`, in the same change; `build.sh` refuses a mismatch
   and the `builder image` workflow fails the PR. The same holds for Go:
   moving `go/go.mod`'s `go` line moves `GO_VERSION` / `GO_SHA256` there (the

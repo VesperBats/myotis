@@ -147,7 +147,7 @@ The reference toolchain for the Android artifacts is a container image,
 |---|---|
 | Base image (`ubuntu:26.04`) | digest |
 | apt packages | one `snapshot.ubuntu.com` instant; the resulting package list is committed (`apt-packages.txt`) and checked |
-| JDK (Eclipse Temurin) | SHA-256 of the archive; version from `.java-version` |
+| JDK (Eclipse Temurin) | SHA-256 of the archive; version and build from `.java-version` (`21.0.13+9`), the exact release every runner's setup-java installs too |
 | rustup, rustc | SHA-256 of `rustup-init`; exact rustc from `rust/rust-toolchain.toml` |
 | Android command-line tools, platform | SHA-256 of the archives |
 | NDK, build-tools, cargo-ndk | exact versions from `gradle/libs.versions.toml` |

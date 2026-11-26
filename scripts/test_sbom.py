@@ -128,7 +128,7 @@ dependencies = ["unreachable"]
     def __init__(self, directory):
         self.root = Path(directory)
         self.write("build.gradle.kts", 'allprojects {\n    version = "1.2.3-SNAPSHOT"\n}\n')
-        self.write(".java-version", "21.0.13\n")
+        self.write(".java-version", "21.0.13+9\n")
         self.write("rust/rust-toolchain.toml", '[toolchain]\nchannel = "1.99.1"\n')
         self.write("proj/gradle.lockfile", self.LOCK)
         self.write("gradle/verification-metadata.xml", metadata(self.PINNED))
@@ -366,17 +366,23 @@ class MadeUp(unittest.TestCase):
 
     def test_the_jdk_only_where_one_is_bundled_and_rust_where_crates_are(self):
         app, native = self.components("app"), self.components("native")
-        jdk = app["myotis:toolchain:temurin-jdk@21.0.13"]
-        self.assertEqual(jdk["cpe"], "cpe:2.3:a:eclipse:temurin:21.0.13:*:*:*:*:*:*:*")
+        jdk = app["myotis:toolchain:temurin-jdk@21.0.13+9"]
+        self.assertEqual(jdk["version"], "21.0.13+9", "the exact build setup-java installs")
+        self.assertEqual(jdk["cpe"], "cpe:2.3:a:eclipse:temurin:21.0.13:*:*:*:*:*:*:*", "the CPE names the release")
         self.assertEqual(app["myotis:toolchain:rust-std@1.99.1"]["cpe"], "cpe:2.3:a:rust-lang:rust:1.99.1:*:*:*:*:*:*:*")
-        self.assertNotIn("myotis:toolchain:temurin-jdk@21.0.13", native)
+        self.assertNotIn("myotis:toolchain:temurin-jdk@21.0.13+9", native)
         self.assertIn("myotis:toolchain:rust-std@1.99.1", native)
 
     def test_a_toolchain_that_is_not_pinned_exactly_is_refused(self):
-        self.tree.write(".java-version", "21\n")
-        with self.assertRaisesRegex(sbom.SbomError, "not an exact JDK release"):
-            self.build()
-        self.tree.write(".java-version", "21.0.13\n")
+        for loose in ("21\n", "21.0.13\n", "21.0.13+\n", "21.0.13+9-LTS\n"):
+            with self.subTest(java_version=loose):
+                self.tree.write(".java-version", loose)
+                try:
+                    with self.assertRaisesRegex(sbom.SbomError, "not an exact JDK release"):
+                        self.build()
+                finally:
+                    # Each case starts from the pinned release, whatever the one before did.
+                    self.tree.write(".java-version", "21.0.13+9\n")
         self.tree.write("rust/rust-toolchain.toml", '[toolchain]\nchannel = "stable"\n')
         with self.assertRaisesRegex(sbom.SbomError, "not an exact release"):
             self.build()
