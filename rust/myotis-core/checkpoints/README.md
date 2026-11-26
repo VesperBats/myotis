@@ -8,10 +8,12 @@ The hash of every 1024th block per network, a trust anchor: the rule is in
 |---|---|
 | `mainnet-1024.hashes` | 32 bytes per entry; entry *i* is the hash of block *i*·1024, from block 0 up to the last multiple of 1024 at or below the top |
 | `mainnet-1024.hashes.json` | the build's sidecar: entries, last entry, top block and hash, genesis hash, keccak256, source client, cross-check |
+| `gnosis-1024.hashes` | the same for Gnosis Chain (chain 100) |
+| `gnosis-1024.hashes.json` | its sidecar |
 
-The loader does not read the sidecar. It checks the table against `MAINNET_PIN` in
-`../src/checkpoints.rs`: the keccak256, the number of entries, entry 0 against the genesis
-hash, and the top. A table that does not match is refused.
+The loader does not read the sidecars. It checks each table against its pin in
+`../src/checkpoints.rs` (`MAINNET_PIN`, `GNOSIS_PIN`): the keccak256, the number of entries,
+entry 0 against the genesis hash, and the top. A table that does not match is refused.
 
 ## The mainnet table
 
@@ -57,12 +59,63 @@ hash, and the top. A table that does not match is refused.
   are kept byte for byte (`cmp -n`). Now 25,871 entries, 827,872 bytes, keccak256
   `0x010a1eb4…f9be`.
 
+## The Gnosis Chain table
+
+The owner's decision of 2026-11-25 extends D1 to Gnosis Chain (chain 100): a table built from
+the owner's own Gnosis archive node, pinned like mainnet's.
+
+- **Built** 2026-11-26 by `ethswarm checkpoint-table` at eth2swarm `4936aea`, from Erigon
+  3.8.1 (`--chain=gnosis`, archive). That commit teaches the tool the AuRa headers of Gnosis
+  Chain before its merge (block 25,349,536 and below): their RLP carries the AuRa step and
+  signature where `mixHash` and `nonce` stand. The tool hashed every header itself (the hash
+  had to equal the node's) and linked each one by `parentHash` down to the genesis hash
+  `0x4f1dd231…9756`.
+- **Top:** block **49,469,393** (`0x432535a0…90e0`), passed as `--top`/`--top-hash` (the
+  sidecar can only say "the caller"). What it rests on:
+  - It was the finalized block of Myotis's own Gnosis light client on 2026-11-26:
+    `myotis-rpcd --network gnosis` built from Myotis `ae4dcd2d` (on `main`), its execution
+    block checked against a sync-committee-signed finalized header.
+  - That light client was anchored with `--checkpoint-root 0x6bed064e…4a0e --checkpoint-slot
+    31328048`, not the release's embedded Gnosis checkpoint (slot 31,321,840). Two operators,
+    gnosischain.com (`rpc-gbc`) and publicnode.com, report that root as the finalized,
+    canonical block of slot 31,328,048.
+  - The beacon block that carries the top is slot **31,331,072** (an epoch boundary), root
+    `0x9278d150de40dd53569f4df80f04f97ad5b7e25934509aa4908d01d543829768`. Both operators
+    report it finalized, with execution payload block 49,469,393 and hash `0x432535a0…90e0`.
+    The pair can be checked against the beacon chain later, without an execution node.
+  - **Checked by a running node.** On 2026-11-26 a `myotis-rpcd --network gnosis` built from
+    this table's branch, anchored on the release's embedded Gnosis checkpoint (slot
+    31,321,840, root `0x61302d86…8a05`, independent of the anchor above), was asked for block
+    49,469,400. Its gap walk from its attested finalized block (49,470,648) reached the top and
+    found `0x432535a0…90e0` there: its kept state says `checked`, no alarm. It then served
+    blocks 45,000,701 and 25,349,537 through the table, with the hashes the source node gives,
+    and refused block 25,349,536 as before the merge.
+  - The source node's finalized block was the same block with the same hash. That adds
+    little: an execution node's finalized block is what its consensus client tells it.
+  - No second Gnosis execution client was at hand, so the 200-entry cross-check of mainnet's
+    builds was not run. Four entries (blocks 1024, 25,349,120, 25,350,144 and 45,000,704)
+    were hashed from the node's raw headers by a keccak apart from the tool, and the test
+    `gnosis_known_entries` pins them. They come from the same node, so this checks the tool,
+    not the source.
+- **Size:** 48,310 entries, 1,545,920 bytes (about 1.55 MB in every app
+  that embeds the Rust engine). keccak256 `0xaf23cdad…45eb`.
+- **What it serves:** blocks after the merge only (`first_served(100)`, block 25,349,537 up).
+  The engine's header decoder does not read AuRa headers, so a deep read of an earlier block
+  keeps the refusal it had without a table. The entries below the merge are there because the
+  format starts at genesis, and they are checked by the same walk.
+- **Above the top** the running node walks the gap down from its attested finalized block,
+  as on mainnet. Gnosis Chain makes a block every 5 s, so the gap grows by about 17,000 blocks
+  (17 walks of 1024 headers) a day until the next release extends the table.
+
 ## Changing a table
 
 A table changes only in a release PR that names its build: the tool, the source node, the
 top, and the cross-check. Each release extends it (`.claude/agent/releases.md`, step 6):
 replace the file and the sidecar, and move the pin in `../src/checkpoints.rs` in the same
-commit: `MAINNET_PIN`, plus the new pin appended to `MAINNET_SHIPPED`. The new table's bytes
+commit: `MAINNET_PIN`, plus the new pin appended to `MAINNET_SHIPPED` (for Gnosis Chain,
+`GNOSIS_PIN` and `GNOSIS_SHIPPED`). How a release extends the Gnosis table, and what its top
+rests on without a second Gnosis client, is rule text that awaits the owner's sign-off
+(`.claude/agent/releases.md`, step 6, names mainnet's only). The new table's bytes
 up to the old last entry must equal the old table's, so a release only appends. The test
 `every_shipped_table_is_a_prefix` checks that in CI, since GitHub shows a changed table only
 as "Binary files differ". A running node never writes here.
