@@ -1,0 +1,13 @@
+{
+  "chain_id": 100,
+  "k": 1024,
+  "entries": 48310,
+  "last_entry_block": 49468416,
+  "top_block": 49469393,
+  "top_hash": "0x432535a00c6b7659aec02ce7ff34b693a9e4b36a04110b66e7d5f87e0f1f90e0",
+  "top_pinned_by": "the caller (--top-hash)",
+  "genesis_hash": "0x4f1dd23188aab3a76b463e4af801b52b1248ef073c648cbdc4c9333d3da79756",
+  "table_keccak256": "0xaf23cdadb52bd536eccc8fc73c5af7a50c26d5c7152ddf4833f3db0d22de45eb",
+  "source_client": "erigon/3.8.1-cf6f1413/linux-amd64/go1.27.3",
+  "generated_unix": 1795652315
+}

@@ -94,13 +94,16 @@ wrong and the project is pointless** — it becomes just another unverified clie
 3. *(Designed, not yet built in the reference)* **embedded historical accumulators** —
    a pre-Merge epoch-hash accumulator and a post-Merge historical-roots accumulator — for
    verifying deep historical headers. See §10.
-4. **A bundled checkpoint table** (the Rust engine, mainnet so far; owner's decision D1,
-   2026-11-20): the hash of every 1024th block, committed and pinned by keccak256, built by
+4. **A bundled checkpoint table** (the Rust engine, mainnet and Gnosis Chain; owner's
+   decisions D1, 2026-11-20, and its extension to Gnosis Chain, 2026-11-25): the hash of every 1024th block, committed and pinned by keccak256, built by
    a `parentHash` walk down to the genesis hash. A block at or below the table's top, and
    below the 512-block window, verifies by hash-linking its headers (at most 1024) up to
    the first entry at or above it. Until a walk from an attested finalized block has
-   reached the top and found its hash there, such a read rests on the build's cross-check
-   alone. Above the top, a block verifies the same way, but up to a hash the node linked
+   reached the top and found its hash there, such a read rests on what the build pinned the
+   top with: mainnet's, a cross-check against a second client; Gnosis Chain's, a finalized
+   block the light client attested (`rust/myotis-core/checkpoints/README.md`). On Gnosis
+   Chain only blocks after the merge are served: the engine does not decode the AuRa headers
+   before it. Above the top, a block verifies the same way, but up to a hash the node linked
    down from an attested finalized block: through anchors 1 and 2, not the table. A walk
    that finds another hash at the table's top raises an alarm, kept across restarts, that
    refuses every read resting on the table. The rule:

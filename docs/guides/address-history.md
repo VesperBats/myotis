@@ -21,7 +21,7 @@ The rule this rests on is the carve-out for Swarm reads of the address index in
 - **Each entry verified on request.** `myotis_verifyAddressHistoryEntries` checks the entries a
   host shows, by role, against a verified block and its verified receipts, fetched over devp2p.
   Deep blocks verify through the bundled checkpoint table (the D1 rule), which covers mainnet
-  only so far. The answer per entry
+  and Gnosis Chain. The answer per entry
   is `verified`, `contradicted`, `unverified` or `unavailable`. A verified transaction entry
   carries its hash, sender, recipient and value. A final verdict is kept in the node's memory
   (up to 50,000, dropped on a restart, a re-anchor or the table's alarm), and later pages show
@@ -131,8 +131,10 @@ from its verified header), the roles `confirmed` / `contradicted` /
 ERC-20/721 `transfer` the address is a party of. An entry that could not be checked carries
 only its `state` and a `reason`: `unavailable` when the block or its receipts could not be
 read now (ask again), `unverified` when the node cannot anchor the block or the checkpoint
-table's alarm is raised (asking again does not help). The table covers mainnet only: on the
-other networks an entry below the 512-block window comes back `unverified` this way. A call
+table's alarm is raised (asking again does not help). The table covers mainnet and Gnosis
+Chain: on the other networks (Sepolia, Chiado) an entry below the 512-block window comes back
+`unverified` this way. On Gnosis Chain so does an entry from before the merge (block
+25,349,536 and below): its AuRa header does not decode here, though the table holds its hash. A call
 takes at most 90 s, newest blocks first.
 
 ### The daemon's IPC

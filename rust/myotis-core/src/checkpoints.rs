@@ -9,25 +9,29 @@
 //!
 //! The table is committed as an asset (`rust/myotis-core/checkpoints/`), never produced by a
 //! build, and pinned here by its keccak256: [`CheckpointTable::parse`] refuses bytes that do
-//! not match, and [`mainnet`] parses the embedded copy against the pin. A running node never
-//! writes into it.
+//! not match, and [`mainnet`] / [`gnosis`] parse the embedded copy against its pin. A running
+//! node never writes into it. Tables are bundled for mainnet (chain 1) and Gnosis Chain (chain
+//! 100, owner's decision 2026-11-25).
 //!
 //! Why the pin covers every entry and the top: the build linked every header by `parentHash`
 //! from the top down to the genesis hash, so all entries lie on one hash chain between those
-//! two ends. An entry off that chain would break the walk. The top was cross-checked against
-//! a second client, and the running node's gap walk checks it once more (the rule). The pin
-//! then proves these are the bytes of that build.
+//! two ends. An entry off that chain would break the walk. What the top rests on differs per
+//! table: mainnet's was cross-checked against a second client; Gnosis Chain's is a finalized
+//! block the light client attested, with no second execution client (its pin says which, and
+//! the rule's text for it awaits the owner's sign-off). The running node's gap walk checks
+//! either once more (the rule). The pin then proves these are the bytes of that build.
 //!
-//! Sans-I/O like the rest of this crate: [`mainnet`] reads `include_bytes!` data only.
-//! [`CheckpointTable::parse`] hashes the whole table (0.83 MB on mainnet), so a caller
-//! parses once and keeps the table; it is `Copy` and borrows the static bytes.
+//! Sans-I/O like the rest of this crate: [`mainnet`] and [`gnosis`] read `include_bytes!` data
+//! only. [`CheckpointTable::parse`] hashes the whole table (0.83 MB on mainnet, 1.55 MB on
+//! Gnosis Chain), so a caller parses once and keeps the table; it is `Copy` and borrows the
+//! static bytes.
 
 use crate::keccak::keccak256;
 use crate::{err, CoreError};
 use alloc::format;
 
 /// One table: its entries (32-byte hashes, entry `i` = block `i * K`) and its top.
-/// Built only by [`mainnet`] / [`for_chain`] outside this crate, so every table is the
+/// Built only by [`mainnet`] / [`gnosis`] / [`for_chain`] outside this crate, so every table is the
 /// release's, pinned in the source.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct CheckpointTable<'a> {
@@ -184,11 +188,56 @@ pub fn mainnet() -> Result<CheckpointTable<'static>, CoreError> {
     CheckpointTable::parse(MAINNET_BYTES, &MAINNET_PIN)
 }
 
-/// The table for `chain_id`, if one is bundled: mainnet only so far.
+/// The Gnosis Chain table's pin. Built 2026-11-26 by eth2swarm's `ethswarm checkpoint-table`
+/// (eth2swarm at `4936aea`, which hashes the AuRa-sealed headers before the merge) from the
+/// owner's Gnosis Erigon 3.8.1 archive node, every header hashed and linked by `parentHash`
+/// down to the genesis hash. The top is the finalized block of Myotis's Gnosis light client
+/// (`myotis-rpcd --network gnosis`, Myotis `ae4dcd2d`), a sync-committee-attested hash passed
+/// as `--top-hash`: the execution payload of beacon block 31,331,072, a finalized checkpoint.
+/// No second Gnosis execution client was at hand for the 200-entry cross-check mainnet's
+/// builds ran. `checkpoints/README.md` records the evidence; the sidecar names only
+/// `--top-hash`.
+pub const GNOSIS_PIN: TablePin = TablePin {
+    keccak256: hex32("af23cdadb52bd536eccc8fc73c5af7a50c26d5c7152ddf4833f3db0d22de45eb"),
+    entries: 48_310,
+    genesis_hash: hex32("4f1dd23188aab3a76b463e4af801b52b1248ef073c648cbdc4c9333d3da79756"),
+    top_number: 49_469_393,
+    top_hash: hex32("432535a00c6b7659aec02ce7ff34b693a9e4b36a04110b66e7d5f87e0f1f90e0"),
+};
+
+/// Every Gnosis Chain table shipped so far, as [`MAINNET_SHIPPED`] is for mainnet.
+pub const GNOSIS_SHIPPED: &[(u64, [u8; 32])] = &[(48_310, hex32("af23cdadb52bd536eccc8fc73c5af7a50c26d5c7152ddf4833f3db0d22de45eb"))];
+
+/// The embedded Gnosis Chain table's bytes, as committed.
+pub static GNOSIS_BYTES: &[u8] = include_bytes!("../checkpoints/gnosis-1024.hashes");
+
+/// The embedded Gnosis Chain table, parsed against [`GNOSIS_PIN`].
+pub fn gnosis() -> Result<CheckpointTable<'static>, CoreError> {
+    CheckpointTable::parse(GNOSIS_BYTES, &GNOSIS_PIN)
+}
+
+/// Gnosis Chain's last block sealed by AuRa: the merge came after it. Its headers and those
+/// below carry the AuRa step and signature where [`crate::header::BlockHeader`] reads
+/// `mixHash` and `nonce`, so they do not decode, though the table holds their hashes.
+pub const GNOSIS_LAST_AURA_BLOCK: u64 = 25_349_536;
+
+/// The table for `chain_id`, if one is bundled: mainnet and Gnosis Chain.
 pub fn for_chain(chain_id: u64) -> Option<Result<CheckpointTable<'static>, CoreError>> {
     match chain_id {
         1 => Some(mainnet()),
+        100 => Some(gnosis()),
         _ => None,
+    }
+}
+
+/// The lowest block a deep read through `chain_id`'s table serves: the first one whose header
+/// this crate decodes. 0 on mainnet; on Gnosis Chain the first block after the merge
+/// ([`GNOSIS_LAST_AURA_BLOCK`] + 1). Below it a read keeps the refusal it had without a table,
+/// instead of a window no peer's answer would decode.
+pub fn first_served(chain_id: u64) -> u64 {
+    match chain_id {
+        100 => GNOSIS_LAST_AURA_BLOCK + 1,
+        _ => 0,
     }
 }
 
@@ -225,21 +274,58 @@ mod tests {
         assert_eq!(t.entry(0), Some(MAINNET_PIN.genesis_hash));
         assert_eq!(t.entry(MAINNET_PIN.entries), None);
         assert!(for_chain(1).is_some());
-        assert!(for_chain(100).is_none());
+        assert_eq!(first_served(1), 0);
     }
+
+    #[test]
+    fn gnosis_parses_against_its_pin() {
+        let t = gnosis().expect("the committed table matches its pin");
+        assert_eq!(t.len(), GNOSIS_PIN.entries);
+        assert_eq!(t.top(), (GNOSIS_PIN.top_number, GNOSIS_PIN.top_hash));
+        assert_eq!(t.entry(0), Some(GNOSIS_PIN.genesis_hash));
+        assert_eq!(t.entry(GNOSIS_PIN.entries), None);
+        assert_eq!(for_chain(100).map(|r| r.unwrap()), Some(t));
+        assert_eq!(first_served(100), 25_349_537);
+        // Sepolia and Chiado have none.
+        assert!(for_chain(11_155_111).is_none());
+        assert!(for_chain(10_200).is_none());
+    }
+
+    /// Entries of the Gnosis table read from the source node by `debug_getRawHeader` and
+    /// hashed apart from the build: block 1024 (AuRa), block 25,349,120 (the last entry below
+    /// the merge, AuRa with `baseFeePerGas`), block 25,350,144 (the first entry after it) and
+    /// block 45,000,704 (inside the one-year addr1 index, 43,329,216 to 49,465,471).
+    #[test]
+    fn gnosis_known_entries() {
+        let t = gnosis().unwrap();
+        for (block, hash) in GNOSIS_SAMPLES {
+            assert_eq!(t.entry(block / CheckpointTable::K), Some(hex32(hash)), "block {block}");
+        }
+    }
+
+    const GNOSIS_SAMPLES: [(u64, &str); 4] = [
+        (1024, "d631f578dbf72c0bd8d0a789258c27c82912cb1941a6b79f3b7efd5f21b12818"),
+        (25_349_120, "d69325d988375d0fb34fb79a91f56c699e9114e7d3eea47106896a5e091bb974"),
+        (25_350_144, "a96fddea91bdd692a218b400c7132b9678dab5cb3a66c2a066e95e0bbf2ce0c6"),
+        (45_000_704, "761d24f7ee24c89a7a9e1bf44cd30869dfb48f8479b9d158285890ea23777c82"),
+    ];
 
     /// Release step 6 only appends: every shipped table is a prefix of this one, and the
     /// current pin is the last shipped one.
     #[test]
     fn every_shipped_table_is_a_prefix() {
-        let mut last = 0;
-        for &(entries, hash) in MAINNET_SHIPPED {
-            assert!(entries > last, "shipped tables grow");
-            let n = usize::try_from(entries * 32).unwrap();
-            assert_eq!(keccak256(&MAINNET_BYTES[..n]), hash, "{entries} entries");
-            last = entries;
+        for (shipped, bytes, pin) in
+            [(MAINNET_SHIPPED, MAINNET_BYTES, &MAINNET_PIN), (GNOSIS_SHIPPED, GNOSIS_BYTES, &GNOSIS_PIN)]
+        {
+            let mut last = 0;
+            for &(entries, hash) in shipped {
+                assert!(entries > last, "shipped tables grow");
+                let n = usize::try_from(entries * 32).unwrap();
+                assert_eq!(keccak256(&bytes[..n]), hash, "{entries} entries");
+                last = entries;
+            }
+            assert_eq!(shipped.last(), Some(&(pin.entries, pin.keccak256)));
         }
-        assert_eq!(MAINNET_SHIPPED.last(), Some(&(MAINNET_PIN.entries, MAINNET_PIN.keccak256)));
     }
 
     /// The first table's last entry (block 26,457,088), and the DAO-fork block 1,920,000

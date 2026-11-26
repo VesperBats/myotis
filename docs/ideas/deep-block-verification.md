@@ -1,7 +1,9 @@
 # Verifying any historical block: a checkpoint table and a header walk
 
 Status: **built on `feature/swarm-addr1`** (#899): the mainnet table
-(`rust/myotis-core/checkpoints/`), deep block and receipt reads through it and the gap
+(`rust/myotis-core/checkpoints/`; a Gnosis Chain table since the owner's decision of
+2026-11-25, its top a beacon-attested finalized block, serving the blocks after its merge),
+deep block and receipt reads through it and the gap
 walk above its top (`rust/myotis-net/src/el/deep.rs`), archive peers by `earliestBlock`;
 the rule is `.claude/agent/data-sources.md` (Trust). What follows is the analysis it was
 built from, and "Today" below describes the state before it. The measurements
