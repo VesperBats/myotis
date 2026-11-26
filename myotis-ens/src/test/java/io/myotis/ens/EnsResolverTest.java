@@ -85,7 +85,8 @@ class EnsResolverTest {
         return AbiEncoder.encodeRaw(AbiEncoder.uint256(v));
     }
 
-    /** Mainnet today: the Universal Resolver names no ENSv2 root, so v1 decides every name. */
+    /** A chain without ENSv2 (mainnet before block 26,284,289): the Universal Resolver names no
+     *  ENSv2 root, so v1 decides every name. */
     private static EnsResolver ownershipResolver(MockExecutor mock) {
         mock.revertOn(UR, AbiEncoder.encodeCall(FunctionSignature.of("ROOT_REGISTRY()")), new byte[0]);
         return new EnsResolver(mock, REGISTRY, UR, BASE_REGISTRAR, NAME_WRAPPER);
@@ -142,6 +143,7 @@ class EnsResolverTest {
         mock.respond(BASE_REGISTRAR, registrarCall("ownerOf(uint256)", "ens"), encodeAddress(USER));
         mock.respond(BASE_REGISTRAR, registrarCall("nameExpires(uint256)", "ens"), encodeUint(1_823_155_031L));
         mock.respond(BASE_REGISTRAR, gracePeriodCall(), encodeUint(7_776_000L));
+        v2Registries(mock, "ens", 1L);   // RESERVED: handed to v1
         var o = ensv2Resolver(mock, "ens.eth", MIRROR).resolveOwnership("ens.eth", ctx()).get().orElseThrow();
         assertEquals(USER, o.registrant());
         assertEquals(PUBLIC_RESOLVER, o.resolver());
@@ -323,8 +325,29 @@ class EnsResolverTest {
         mock.respond(BASE_REGISTRAR, registrarCall("ownerOf(uint256)", "vitalik"), encodeAddress(USER));
         mock.respond(BASE_REGISTRAR, registrarCall("nameExpires(uint256)", "vitalik"), encodeUint(1_823_155_031L));
         mock.respond(BASE_REGISTRAR, gracePeriodCall(), encodeUint(7_776_000L));
+        v2Registries(mock, "vitalik", 1L);   // RESERVED: handed to v1
         var o = EnsResolver.forChainId(mock, 1L).resolveOwnership("vitalik.eth", ctx()).get().orElseThrow();
         assertEquals(USER, o.registrant());
+    }
+
+    @Test
+    void aNameRegisteredInEnsv2WithTheMirrorAsItsResolverIsRefused() {
+        // #938 review: the mirror is a public contract, and a migrated name's owner can set
+        // it as the resolver. REGISTERED in ENSv2 is ENSv2's, whatever its resolver; so is a
+        // name whose ENSv2 state cannot be read. No v1 call is programmed (Rust twin).
+        for (Long status : new Long[] {2L, 7L, null}) {
+            var mock = new MockExecutor();
+            v2Registries(mock, "taken", status);
+            assertEnsv2Refusal(ensv2Resolver(mock, "taken.eth", MIRROR).resolveOwnership("taken.eth", ctx()));
+        }
+    }
+
+    @Test
+    void theRootNameIsRefusedNotWalked() {
+        // #938 review: "" has no label to ask ENSv2 about; refused, as in the Rust engine,
+        // not an index error.
+        var mock = new MockExecutor();
+        assertEnsv2Refusal(ensv2Resolver(mock, "", Address.ZERO).resolveOwnership("", ctx()));
     }
 
     @Test
