@@ -58,6 +58,13 @@ entry 0 against the genesis hash, and the top. A table that does not match is re
   **26,491,578** (`0x3a2aa218…313a`), the source node's finalized block. The old 827,712 bytes
   are kept byte for byte (`cmp -n`). Now 25,871 entries, 827,872 bytes, keccak256
   `0x010a1eb4…f9be`.
+- **Extended for v0.1.25** (2026-11-26, release step 6) the same way: the same `ethswarm` build
+  (eth2swarm at `2707995`), the nuc's Erigon 3.8.1, cross-checked against Geth 1.17.7 on zbox
+  (203 entries and the top block equal). The walk started at the old last entry (block
+  26,490,880), passed through the old top (block 26,491,578) and went up to the new top: block
+  **26,497,669** (`0xb0400176…68a9`), the source node's finalized block. The old 827,872 bytes
+  are kept byte for byte (`cmp -n`). Now 25,877 entries, 828,064 bytes, keccak256
+  `0xc4845cbe…7ff1`.
 
 ## The Gnosis Chain table
 
