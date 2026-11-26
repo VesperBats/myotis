@@ -538,6 +538,9 @@ pub fn address_history_supported() -> bool {
 /// The address history's settings, engine-wide (#899): `{"importer": "0x…" | null,
 /// "swarm": {"network": "mainnet"} | {"network": "dev", "networkId", "bootnodes"}}`,
 /// applied whole. `{}`, or the permanent `{"error","code":-32602}`. ABI >= 60.
+/// ABI >= 62: `"importers": {"<chain id>": "0x…", …}` in place of `"importer"`, a key per
+/// chain (decimal chain ids); a read on a chain the map does not name is refused (-32602),
+/// and both fields at once are refused.
 #[uniffi::export]
 pub fn set_address_history_config_json(config_json: String) -> String {
     crate::host::set_address_history_config_json(&config_json)

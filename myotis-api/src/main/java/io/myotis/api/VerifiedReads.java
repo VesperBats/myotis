@@ -533,7 +533,8 @@ public interface VerifiedReads {
      * checked it (a kept verdict shows here). Every range the index does not cover is named
      * ({@code headGap}, {@code tailGap}, {@code gaps}), never a shorter list. A retryable
      * {@code {"error"}} when Swarm did not deliver; the permanent
-     * {@code {"error","code":-32602}} for a malformed option, without an importer key, with
+     * {@code {"error","code":-32602}} for a malformed option, without an importer key for this
+     * chain ({@link MyotisEngine#setAddressHistoryConfigJson}), with
      * Tor routing on, on mobile, and on an engine without the reader.
      * Default: {@link #ADDRESS_HISTORY_REFUSED}.
      */

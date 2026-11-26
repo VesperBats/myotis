@@ -436,7 +436,14 @@ uniffi::setup_scaffolding!();
 ///      back with a page's others. A kept verdict carries it too, so the pages that show one
 ///      do. A payload extension, no signature change — bumped, as v41 and v52 were, so a
 ///      host that dates the history's rows is never paired with an engine that cannot.
-pub const ABI_VERSION: i32 = 61;
+/// v62: `set_address_history_config_json` takes `"importers": {"<chain id>": "0x…", …}` in
+///      place of `"importer"`: a key per chain (decimal chain ids), so one engine reads each
+///      chain's index under its own importer. A chain the map does not name is refused like
+///      `"importer": null` (-32602), for that chain only; both fields at once are refused, as
+///      is a chain id or a setting given twice. `"importer"` is unchanged. A payload extension,
+///      no signature change — bumped, as v61 was, so a host that sets a key per chain is
+///      never paired with an engine that refuses the map as an unknown setting.
+pub const ABI_VERSION: i32 = 62;
 
 // Keep the workspace edge alive so `cargo build -p myotis-engine` type-checks the
 // consensus crate too.

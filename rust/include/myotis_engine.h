@@ -36,7 +36,7 @@ extern "C" {
  * rust/myotis-engine/src/lib.rs and is pinned to it by a capi.rs unit test
  * (header_pins_the_current_abi_version), so a bump that forgets this file
  * fails `cargo test`. Gate on this macro — do not copy the number. */
-#define MYOTIS_ABI_VERSION 61
+#define MYOTIS_ABI_VERSION 62
 
 /* Availability + ABI handshake. Installs the log ring subscriber (idempotent)
  * and returns the engine's ABI version; refuse to call anything else if it
@@ -494,7 +494,10 @@ char *myotis_address_activity_json(int64_t handle, int64_t after_block);
  * checked against verified chain data, each with its state (verified, contradicted,
  * unverified, unavailable). myotis_set_address_history_config_json: the importer key and
  * the Swarm network, engine-wide, applied whole ("{}") or refused. Each returned string
- * is freed with myotis_string_free. */
+ * is freed with myotis_string_free.
+ * v62: the settings take "importers": {"<chain id>": "0x…", …} in place of "importer",
+ * a key per chain (decimal chain ids); a read on a chain the map does not name is refused,
+ * and both fields at once are refused (-32602). */
 char *myotis_address_history_json(int64_t handle, const char *address, const char *options_json);
 char *myotis_verify_address_history_json(int64_t handle, const char *address, const char *entries_json);
 char *myotis_set_address_history_config_json(const char *config_json);

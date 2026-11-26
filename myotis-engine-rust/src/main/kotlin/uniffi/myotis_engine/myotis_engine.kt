@@ -1190,7 +1190,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if ((lib.uniffi_myotis_engine_checksum_func_set_activity_watch() and 0xFFFF) != 19585) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if ((lib.uniffi_myotis_engine_checksum_func_set_address_history_config_json() and 0xFFFF) != 4846) {
+    if ((lib.uniffi_myotis_engine_checksum_func_set_address_history_config_json() and 0xFFFF) != 10462) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_myotis_engine_checksum_func_set_dns_discovery() and 0xFFFF) != 13006) {
@@ -2291,6 +2291,9 @@ public object FfiConverterOptionalString: FfiConverterRustBuffer<kotlin.String?>
          * The address history's settings, engine-wide (#899): `{"importer": "0x…" | null,
          * "swarm": {"network": "mainnet"} | {"network": "dev", "networkId", "bootnodes"}}`,
          * applied whole. `{}`, or the permanent `{"error","code":-32602}`. ABI >= 60.
+         * ABI >= 62: `"importers": {"<chain id>": "0x…", …}` in place of `"importer"`, a key per
+         * chain (decimal chain ids); a read on a chain the map does not name is refused (-32602),
+         * and both fields at once are refused.
          */ fun `setAddressHistoryConfigJson`(`configJson`: kotlin.String): kotlin.String {
             return FfiConverterString.lift(
     uniffiRustCall() { _status ->

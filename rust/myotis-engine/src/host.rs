@@ -3370,7 +3370,8 @@ pub fn address_history_supported() -> bool {
 }
 
 /// `set_address_history_config_json`: the address history's settings (`addrhist`):
-/// the importer key and the Swarm network. Applied whole or refused (-32602).
+/// the importer key (one for every chain, or one per chain) and the Swarm network. Applied
+/// whole or refused (-32602).
 pub fn set_address_history_config_json(json: &str) -> String {
     // A build without the reader refuses the settings too, as the Java and Go engines do:
     // a daemon told to use the history must not start as if it could.
