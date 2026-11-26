@@ -83,6 +83,13 @@ the owner's own Gnosis archive node, pinned like mainnet's.
     `0x9278d150de40dd53569f4df80f04f97ad5b7e25934509aa4908d01d543829768`. Both operators
     report it finalized, with execution payload block 49,469,393 and hash `0x432535a0…90e0`.
     The pair can be checked against the beacon chain later, without an execution node.
+  - **Checked by a running node.** On 2026-11-26 a `myotis-rpcd --network gnosis` built from
+    this table's branch, anchored on the release's embedded Gnosis checkpoint (slot
+    31,321,840, root `0x61302d86…8a05`, independent of the anchor above), was asked for block
+    49,469,400. Its gap walk from its attested finalized block (49,470,648) reached the top and
+    found `0x432535a0…90e0` there: its kept state says `checked`, no alarm. It then served
+    blocks 45,000,701 and 25,349,537 through the table, with the hashes the source node gives,
+    and refused block 25,349,536 as before the merge.
   - The source node's finalized block was the same block with the same hash. That adds
     little: an execution node's finalized block is what its consensus client tells it.
   - No second Gnosis execution client was at hand, so the 200-entry cross-check of mainnet's
