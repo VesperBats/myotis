@@ -579,7 +579,10 @@ public final class EnsResolver {
                 Optional<Address> resolver = word.flatMap(EnsResolver::cleanAddress);
                 if (resolver.isEmpty()) return CompletableFuture.completedFuture(Decider.ENSV2);
                 if (resolver.get().equals(Address.ZERO)) {
-                    return ensv2RegistersNothing(root.get(), labels, labels.length - 1, ctx)
+                    // Asked about the name dnsName spells, the one findResolver answered
+                    // for: a trailing root dot's empty label is not walked.
+                    int top = labels[labels.length - 1].isEmpty() ? labels.length - 2 : labels.length - 1;
+                    return ensv2RegistersNothing(root.get(), labels, top, ctx)
                             .thenApply(nothing -> nothing ? Decider.NOBODY : Decider.ENSV2);
                 }
                 if (ensv1Mirror == null || !resolver.get().equals(ensv1Mirror)) {

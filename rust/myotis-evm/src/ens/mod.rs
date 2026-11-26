@@ -446,7 +446,9 @@ pub fn resolve_ownership(
     let node = ns.node(name)?;
     let wrapper = name_wrapper(chain_id);
     let decider = match ns.universal_resolver {
-        Some(ur) => decider(caller, ur, ns.registry, &dns, &labels)?,
+        // ENSv2 is asked about the name `dns` spells, the one the Universal
+        // Resolver answers for: without a trailing root dot's empty label.
+        Some(ur) => decider(caller, ur, ns.registry, &dns, labels.strip_suffix(&[""]).unwrap_or(&labels))?,
         None => Decider::V1,
     };
     if decider == Decider::Ensv2 {
@@ -573,8 +575,9 @@ fn decider(
 /// (never registered, or expired: ENSv2 has no grace period) or REGISTERED with
 /// no subregistry below it. A RESERVED label, the name itself REGISTERED, and
 /// an answer that cannot be read (a revert, a status outside the enum) are not
-/// "nothing": the caller refuses them, never guesses. The labels are split as
-/// the v1 reads split them, so a trailing root dot's empty label is asked too.
+/// "nothing": the caller refuses them, never guesses. The labels are those of
+/// the name the Universal Resolver was asked about: a trailing root dot's empty
+/// label is not among them, so `x.eth.` is judged as `x.eth`.
 fn ensv2_registers_nothing(
     caller: &dyn EthCaller,
     root: [u8; 20],
@@ -2470,6 +2473,31 @@ mod tests {
                 "status {status:?}"
             );
         }
+    }
+
+    #[test]
+    fn a_trailing_dot_asks_ensv2_about_the_name_the_universal_resolver_answered_for() {
+        // findResolver gets dns_encode("taken.eth.") = taken.eth, so ENSv2 is asked
+        // about taken.eth too: REGISTERED there is refused, not read as the empty
+        // label's AVAILABLE (code review).
+        let dns = dns_encode("taken.eth").unwrap();
+        let caller = with_v2_registries(
+            ensv2_chain(MockCaller::new(), dns, [0u8; 20]),
+            |_| Some(STATUS_REGISTERED),
+            |_| [0u8; 20],
+        )
+        .on(|t, _| (t == REGISTRY || t == BASE_REGISTRAR).then(|| panic!("v1 read for an ENSv2 name")));
+        assert_eq!(resolve_ownership(&caller, "taken.eth."), Err(EnsError::Unsupported(ENSV2_OWNERSHIP)));
+        // AVAILABLE: nothing, with v1 read at the dotted node, as the records are.
+        let dns = dns_encode("nobody.eth").unwrap();
+        let caller = with_v1_ownership(
+            with_v2_registries(ensv2_chain(MockCaller::new(), dns, [0u8; 20]), |_| Some(STATUS_AVAILABLE), |_| [0u8; 20]),
+            [0u8; 20],
+            [0u8; 20],
+            None,
+            0,
+        );
+        assert_eq!(resolve_ownership(&caller, "nobody.eth."), Ok(None));
     }
 
     #[test]

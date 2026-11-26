@@ -274,6 +274,16 @@ class EnsResolverTest {
     }
 
     @Test
+    void aTrailingDotAsksEnsv2AboutTheNameTheUniversalResolverAnsweredFor() {
+        // findResolver gets taken.eth (DnsEncoder drops the trailing dot), so ENSv2 is
+        // asked about taken.eth too: REGISTERED is refused (Rust twin, code review).
+        var mock = new MockExecutor();
+        v2Registries(mock, "taken", 2L);
+        assertEnsv2Refusal(ensv2Resolver(mock, "taken.eth", Address.ZERO)
+                .resolveOwnership("taken.eth.", ctx()));
+    }
+
+    @Test
     void aSubnameBelowARegisteredNameWithoutASubregistryIsNothing() throws Exception {
         // sub.taken.eth: taken.eth is REGISTERED in ENSv2 but has no subregistry.
         var mock = new MockExecutor();
