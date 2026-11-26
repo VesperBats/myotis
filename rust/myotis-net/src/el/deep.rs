@@ -13,6 +13,8 @@
 //!   verified window is recorded with [`DeepAnchors::record_window_under`], which keeps every
 //!   1024th block's hash and the window's bottom. The gap closes lazily, only as far down as
 //!   a read needs.
+//! - **Below the table's floor** (`checkpoints::first_served`: Gnosis Chain's AuRa blocks,
+//!   before its merge, whose headers this engine does not decode): no plan, today's refusal.
 //! - **The alarm:** a recorded window that covers the table's top must carry the top's hash.
 //!   A mismatch means the table and the beacon chain disagree. Every read resting on the
 //!   table is then refused, permanently ([`ALARM_PREFIX`]), and never outvoted.
@@ -65,6 +67,10 @@ pub(crate) enum Plan {
 #[derive(Debug, Default)]
 pub(crate) struct DeepAnchors {
     table: Option<CheckpointTable<'static>>,
+    /// The lowest block a deep read is served for (`checkpoints::first_served`): below it the
+    /// table holds hashes whose headers this engine does not decode (Gnosis's AuRa blocks),
+    /// so a read there keeps today's lasting refusal instead of failing at every peer.
+    floor: u64,
     /// The file the state is kept in, or `None` to keep it in memory only.
     store: Option<PathBuf>,
     state: Mutex<Linked>,
@@ -105,7 +111,13 @@ impl DeepAnchors {
         if table.is_some() && store.is_none() {
             tracing::warn!(chain_id, "no data dir: the deep anchors' state (alarm included) is kept in memory only");
         }
-        Self { table, store: store.filter(|_| table.is_some()), state: Mutex::new(state), ..Self::default() }
+        Self {
+            table,
+            floor: myotis_core::checkpoints::first_served(chain_id),
+            store: store.filter(|_| table.is_some()),
+            state: Mutex::new(state),
+            ..Self::default()
+        }
     }
 
     #[cfg(test)]
@@ -148,9 +160,12 @@ impl DeepAnchors {
     }
 
     /// What a read at `n` needs, given the attested finalized block `fin` (`n <= fin.0`).
-    /// `None` without a table: the caller keeps today's refusal.
+    /// `None` without a table, or below its floor: the caller keeps today's refusal.
     pub(crate) fn plan(&self, n: u64, fin: (u64, [u8; 32])) -> Option<Plan> {
         let table = self.table.as_ref()?;
+        if n < self.floor {
+            return None;
+        }
         let state = self.state.lock().ok()?;
         if state.alarm.is_some() {
             return Some(Plan::Refused);
@@ -263,6 +278,7 @@ impl DeepAnchors {
 /// once per process, not on every reader start.
 fn table_for(chain_id: u64) -> Option<CheckpointTable<'static>> {
     static MAINNET: std::sync::OnceLock<Option<CheckpointTable<'static>>> = std::sync::OnceLock::new();
+    static GNOSIS: std::sync::OnceLock<Option<CheckpointTable<'static>>> = std::sync::OnceLock::new();
     let parse = || match myotis_core::checkpoints::for_chain(chain_id) {
         Some(Ok(t)) => Some(t),
         Some(Err(e)) => {
@@ -273,6 +289,7 @@ fn table_for(chain_id: u64) -> Option<CheckpointTable<'static>> {
     };
     match chain_id {
         1 => *MAINNET.get_or_init(parse),
+        100 => *GNOSIS.get_or_init(parse),
         _ => parse(),
     }
 }
@@ -501,6 +518,60 @@ mod tests {
         assert_eq!(store_path(p), Some(PathBuf::from("/data/deep-anchors-sepolia.txt")));
         assert_eq!(store_path(std::path::Path::new("/data/peers.cache")), Some(PathBuf::from("/data/deep-anchors.txt")));
         assert_eq!(store_path(std::path::Path::new("/data/other.cache")), None);
+    }
+
+    /// A deep Gnosis Chain block verifies through the bundled table: four headers recorded
+    /// from the owner's Gnosis Erigon archive node (`debug_getRawHeader`, blocks 45,000,701
+    /// to 45,000,704, inside the one-year addr1 index), checked as a deep read checks a peer's
+    /// window. The table's entry for block 45,000,704 is the anchor; the window must hash to
+    /// it and hash-link down to the block read.
+    #[test]
+    fn a_deep_gnosis_block_verifies_through_the_bundled_table() {
+        use crate::el::verify::{walked_block_hashes, ChainHeader};
+        use myotis_core::header::{self, BlockHeader};
+        let raw: [&[u8]; 4] = [
+            include_bytes!("../../../testdata/el/gnosis-deep/gnosis-45000701.header.rlp"),
+            include_bytes!("../../../testdata/el/gnosis-deep/gnosis-45000702.header.rlp"),
+            include_bytes!("../../../testdata/el/gnosis-deep/gnosis-45000703.header.rlp"),
+            include_bytes!("../../../testdata/el/gnosis-deep/gnosis-45000704.header.rlp"),
+        ];
+        let decode = || -> Vec<ChainHeader> {
+            raw.iter().map(|r| ChainHeader { hash: header::hash(r), header: BlockHeader::decode(r).unwrap() }).collect()
+        };
+        let window = decode();
+        let d = DeepAnchors::for_chain(100, None);
+        let fin = myotis_core::checkpoints::GNOSIS_PIN.top_number;
+        let Some(Plan::Anchor { number, hash }) = d.plan(45_000_701, (fin, h(fin))) else {
+            panic!("the Gnosis table anchors block 45,000,701");
+        };
+        assert_eq!(number, 45_000_704);
+        let linked = walked_block_hashes(&window, number, &hash, 45_000_701).expect("the window verifies");
+        assert_eq!(linked.len(), 4);
+        // A header below the anchor swapped for another one: the links break.
+        let mut forged = decode();
+        forged[1].hash = [0xee; 32];
+        assert!(walked_block_hashes(&forged, number, &hash, 45_000_701).is_none());
+    }
+
+    /// Below Gnosis Chain's merge the table holds hashes, but the AuRa headers do not decode
+    /// here, so a deep read keeps today's lasting refusal (no plan) rather than failing at
+    /// every peer. The first block after the merge is served.
+    #[test]
+    fn gnosis_blocks_before_the_merge_keep_the_refusal() {
+        use myotis_core::checkpoints::GNOSIS_LAST_AURA_BLOCK;
+        let aura: &[u8] = include_bytes!("../../../testdata/el/gnosis-deep/gnosis-25349536.header.rlp");
+        assert!(myotis_core::header::BlockHeader::decode(aura).is_err(), "an AuRa header");
+        let d = DeepAnchors::for_chain(100, None);
+        let fin = (49_000_000, h(49_000_000));
+        assert_eq!(d.plan(GNOSIS_LAST_AURA_BLOCK, fin), None);
+        assert_eq!(d.plan(1, fin), None);
+        assert!(matches!(
+            d.plan(GNOSIS_LAST_AURA_BLOCK + 1, fin),
+            Some(Plan::Anchor { number: 25_350_144, .. })
+        ));
+        // Mainnet's table serves from genesis.
+        let m = DeepAnchors::for_chain(1, None);
+        assert!(matches!(m.plan(1, (20_000_000, h(20_000_000))), Some(Plan::Anchor { number: 1024, .. })));
     }
 
     #[test]
