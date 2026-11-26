@@ -80,6 +80,36 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # On a v* tag push, the macOS jobs below wait for the tag's first wave (the
+  # engine library and the desktop dmgs), which get the account's few macOS
+  # runners first (owner's request, 2026-11-26; .github/tag-first-wave.sh).
+  # Only a tag push waits. The held jobs also start if this job fails
+  # (`!cancelled()`), and past its cap (120 minutes) it lets them go.
+  first-wave:
+    name: Wait for the tag's first wave
+    # Only a tag push waits; on every other event the held jobs start at once.
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-26.04
+    timeout-minutes: 140
+    permissions:
+      contents: read
+      # To see when the tag's first-wave runs are done.
+      actions: read
+    steps:
+      - name: Checkout
+        continue-on-error: true
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/tag-first-wave.sh
+          sparse-checkout-cone-mode: false
+      - name: Wait for the engine library and the desktop dmgs
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: .github/tag-first-wave.sh
+
   # Whether a merge-queue entry builds the framework (queue-scope.yml): the
   # push filter's list above. On a push to main, a tag and a dispatch it
   # answers true, so the build and the tag's release upload behind it run.
@@ -112,13 +142,15 @@ jobs:
       contents: read
 
   build:
-    needs: scope
+    needs: [scope, first-wave]
     # No PR builds the framework: the merge queue does, for an entry the scope
     # job keeps. Every job below needs this one, so this `if` must stay true on
     # every event but pull_request and merge_group, or a tag would publish
     # nothing (#582): the scope job answers true on all of them. `!= 'false'`:
-    # an empty answer (a failed scope job) builds.
-    if: github.event_name != 'pull_request' && needs.scope.outputs.build != 'false'
+    # an empty answer (a failed scope job) builds. `!cancelled()`: neither that
+    # nor a failed wait for the tag's first wave (.github/tag-first-wave.sh)
+    # holds the build back.
+    if: ${{ !cancelled() && github.event_name != 'pull_request' && needs.scope.outputs.build != 'false' }}
     # macos-15 for a recent Xcode toolchain (the Kotlin/Native iOS link needs
     # Xcode's clang/ld for the target). macos-14's Xcode also linked a static
     # framework (that image was retired on 2026-11-02), but 15 tracks closer to the
