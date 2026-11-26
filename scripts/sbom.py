@@ -427,8 +427,12 @@ def toolchain_components(root, product):
     components = []
     if product.get("jdk"):
         version = (root / ".java-version").read_text(encoding="utf-8").strip()
-        if not re.fullmatch(r"\d+\.\d+\.\d+(\.\d+)*", version):
+        # The release and, after a `+`, its build (21.0.13+9): the build is what
+        # setup-java installs exactly, so a release without one is not exact. The
+        # CPE names the release alone, as NVD does.
+        if not re.fullmatch(r"\d+\.\d+\.\d+(\.\d+)*\+\d+", version):
             raise SbomError(f".java-version is {version!r}, not an exact JDK release")
+        release = version.split("+", 1)[0]
         components.append({
             "type": "platform",
             "bom-ref": f"myotis:toolchain:temurin-jdk@{version}",
@@ -436,7 +440,7 @@ def toolchain_components(root, product):
             "name": "Eclipse Temurin JDK",
             "version": version,
             "description": "The Java runtime jlink builds into the installer (jpackage), from the JDK the build runs on.",
-            "cpe": f"cpe:2.3:a:eclipse:temurin:{version}:*:*:*:*:*:*:*",
+            "cpe": f"cpe:2.3:a:eclipse:temurin:{release}:*:*:*:*:*:*:*",
             "properties": [{"name": "myotis:pinned-by", "value": ".java-version"}],
         })
     if product["cargo"]:
