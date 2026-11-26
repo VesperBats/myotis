@@ -11,11 +11,14 @@ jobs:
   discover:
     name: Peer Discovery (UDP allowed)
     runs-on: ubuntu-26.04
-    # Warm runs: ~19 min of Build, then the 5-min discovery run. Cold-cache days
-    # (post-outage evictions) add ~12 min of Rust compile. 45 leaves room for
-    # both; the discovery step itself is bounded by `timeout` below, so the job
-    # limit is a backstop, not the way the run ends.
-    timeout-minutes: 45
+    # Build took ~19-26 min in the runs measured so far, then the discovery step
+    # takes 5 min (at most 5.5 with the KILL grace), then the post-job cache
+    # saves. Cold-cache days (post-outage evictions) add ~12 min of Rust compile,
+    # and that is exactly when both caches save. The discovery step is bounded
+    # by `timeout` below, so this limit is a pure backstop, not the way the run
+    # ends: generous costs nothing, and a job cut during the cache save would end
+    # "cancelled" again.
+    timeout-minutes: 60
 
     steps:
       - name: Checkout
@@ -57,7 +60,10 @@ jobs:
         # deps now come from Maven Central, so fetch normally.)
         # -PskipRustEngine: no Rust/Android toolchain here, and :android-app builds
         # the engine from source by default; this job only exercises the JVM daemon.
-        run: ./gradlew build -x test --no-daemon -PskipRustEngine
+        # cargoBuildHost is named so the Rust host library is built here by
+        # construction (not only through a test task -x test leaves in), and the
+        # discovery step's 300 s go to the daemon, not to cargo.
+        run: ./gradlew build cargoBuildHost -x test --no-daemon -PskipRustEngine
 
       - name: Run devp2p discovery (5 min timeout)
         id: discovery
@@ -65,10 +71,20 @@ jobs:
           # `:app:run` starts the daemon, which runs until stopped: without the
           # `timeout` every run hit the job limit and ended "cancelled" (all of
           # them from 2026-11-20 on, at least). SIGINT lets Gradle and the daemon
-          # shut down cleanly; KILL 30 s later if they do not. The exit status of
-          # a timed-out run is expected and ignored; the next step reads the log.
+          # shut down cleanly; KILL 30 s later if they do not.
+          # `timeout` exits 124 when it stopped the command (137 when it took the
+          # KILL): that is the planned end, and the next step reads the log.
+          # Any other status means Gradle or the daemon ended by itself (a build
+          # failure, a daemon that died at start-up): that fails the job, since
+          # a quiet network is not the cause. The status is read from PIPESTATUS,
+          # so the pipeline itself must not fail the step.
           set +o pipefail
-          timeout --signal=INT --kill-after=30s 300 ./gradlew :app:run --no-daemon 2>&1 | tee discovery.log || true
+          timeout --signal=INT --kill-after=30s 300 ./gradlew :app:run --no-daemon 2>&1 | tee discovery.log
+          rc=${PIPESTATUS[0]}
+          if [ "$rc" != 124 ] && [ "$rc" != 137 ]; then
+            echo "::error::./gradlew :app:run ended by itself (status $rc) before the 300 s were over"
+            exit 1
+          fi
 
       - name: Report result
         run: |
@@ -77,12 +93,18 @@ jobs:
           # engine (the default) logs each connected snap peer, the Java engine
           # each answer to a header request. "BLOCK HEADERS RECEIVED", which this
           # step looked for, is no longer logged by either.
+          # The 300 s are the step's budget; Gradle's start-up comes out of them,
+          # so the daemon itself runs a little less.
           ok='el dial: snap peer connected|\[eth\] Received [0-9]+ block headers'
-          if grep -Eq "$ok" discovery.log; then
-            echo "SUCCESS: $(grep -Ec "$ok" discovery.log) devp2p connection(s) or header answer(s) in 300 s"
+          if ! grep -q '=== ethp2p Daemon (' discovery.log; then
+            echo "The daemon never started (no '=== ethp2p Daemon (' line in discovery.log)."
+            tail -30 discovery.log || true
+            exit 1
+          elif grep -Eq "$ok" discovery.log; then
+            echo "SUCCESS: $(grep -Ec "$ok" discovery.log) devp2p connection(s) or header answer(s) within the step's 300 s"
             grep -E "$ok" discovery.log | head -10
           else
-            echo "No devp2p peer connected and no headers received within 300 s."
+            echo "The daemon ran, but no devp2p peer connected and no headers were received within the step's 300 s."
             echo "Discovery / dial lines:"
             grep -E "discv4|el dial|\[eth\]" discovery.log | tail -30 || true
             # Don't fail the job – UDP may still be restricted on this runner
