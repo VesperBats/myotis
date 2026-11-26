@@ -13,6 +13,9 @@ pub mod anchor;
 pub mod discv4;
 pub mod deep;
 pub mod dnsdisco;
+// Dev-only: on only through this crate's dev-dependency (Cargo.toml `eez-dev`).
+#[cfg(feature = "eez-dev")]
+pub mod eez;
 pub mod enrfilter;
 pub mod eth;
 mod feecache;

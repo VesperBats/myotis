@@ -159,6 +159,11 @@ tor = ["dep:arti-client", "dep:tor-rtcompat"]
 # myotis-evm's recorded-world files, for examples/record_shield_fixture.rs.
 # Test tooling: on only through this crate's own dev-dependency below.
 fixture-recorder = ["myotis-evm/fixture"]
+# The EEZ settlement anchor (`el::eez`), dev-only (owner's decision,
+# 2026-11-26; docs/ideas/gnosis-eez.md §4): on only through this crate's own
+# dev-dependency below, so tests and examples see it and no release build,
+# engine library or shipped .so carries it.
+eez-dev = []
 
 [dev-dependencies]
 myotis-wire = { path = "../myotis-wire", features = ["test-util"] }
@@ -166,10 +171,11 @@ myotis-wire = { path = "../myotis-wire", features = ["test-util"] }
 myotis-core = { path = "../myotis-core", features = ["test-util"] }
 # readstats shape tests parse their own JSON output.
 serde_json = "1"
-# Tests and examples build this crate with `fixture-recorder`, so the fixture
-# recorder example compiles in every `cargo test`/clippy run while the engine
-# library and the shipped .so never carry its seam.
-myotis-net = { path = ".", features = ["fixture-recorder"] }
+# Tests and examples build this crate with `fixture-recorder` and `eez-dev`,
+# so the fixture recorder example and the EEZ anchor compile in every
+# `cargo test`/clippy run while the engine library and the shipped .so never
+# carry either.
+myotis-net = { path = ".", features = ["fixture-recorder", "eez-dev"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # test-util only: `#[tokio::test(start_paused = true)]` drives the interactive
 # read HEDGING on the paused clock, so the timing invariants are asserted
