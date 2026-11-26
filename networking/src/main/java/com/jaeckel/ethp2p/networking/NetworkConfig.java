@@ -127,9 +127,9 @@ public record NetworkConfig(
             // genesis_validators_root (mainnet)
             Bytes.fromHexString("4b363db94e286120d76eb905340fdd4e54bfe9f06bf33ff6cf5ad27f511bfe95").toArrayUnsafe(),
             // @checkpoint:mainnet:begin — managed by `./gradlew refreshCheckpoint`
-            // trusted checkpoint: recent finalized mainnet block root (slot 15731456, 2026-11-25, period 1920)
-            Bytes.fromHexString("383acc4bd91da3dcafa24c6ccb7f31b652265c858f87a1632242e0600ff50328").toArrayUnsafe(),
-            15731456L, // checkpoint slot (epoch = slot/32). Must stay in sync with the root above.
+            // trusted checkpoint: recent finalized mainnet block root (slot 15737664, 2026-11-26, period 1921)
+            Bytes.fromHexString("bb2b802050c9c4c84ad08ef33dce8b9d5f109ed6633f5043f12161d7eb27ae98").toArrayUnsafe(),
+            15737664L, // checkpoint slot (epoch = slot/32). Must stay in sync with the root above.
             // @checkpoint:mainnet:end
             // Fork schedule — consensus-specs configs/mainnet.yaml *_FORK_EPOCH /
             // *_FORK_VERSION. Fulu activated at epoch 411392 = slot 13164544 (2025-12-03).
@@ -297,9 +297,9 @@ public record NetworkConfig(
             // genesis_validators_root (sepolia)
             Bytes.fromHexString("d8ea171f3c94aea21ebc42a1ed61052acf3f9209c00e4efbaaddac09ed9b8078").toArrayUnsafe(),
             // @checkpoint:sepolia:begin — managed by `./gradlew refreshCheckpoint`
-            // trusted checkpoint: recent finalized sepolia block root (slot 11655680, 2026-11-25, period 1422)
-            Bytes.fromHexString("1dd4e9082e646858bd97f0767c268bc7312dbd50d40de6bd95a0fca59c47a6d1").toArrayUnsafe(),
-            11655680L, // checkpoint slot (epoch = slot/32). Must stay in sync with the root above.
+            // trusted checkpoint: recent finalized sepolia block root (slot 11661888, 2026-11-26, period 1423)
+            Bytes.fromHexString("1d3f31f9668c0ded142d10d90e33d9e1b17d3e4f1f735d9f021bc77e6ad54b46").toArrayUnsafe(),
+            11661888L, // checkpoint slot (epoch = slot/32). Must stay in sync with the root above.
             // @checkpoint:sepolia:end
             // Fork schedule — eth-clients/sepolia metadata/config.yaml *_FORK_EPOCH /
             // *_FORK_VERSION. Fulu (0x90000075) activated at epoch 272640 (2025-10-14);
@@ -537,9 +537,9 @@ public record NetworkConfig(
             // genesis_validators_root (Gnosis Beacon Chain)
             Bytes.fromHexString("f5dcb5564e829aab27264b9becd5dfaa017085611224cb3036f573368dbb9d47").toArrayUnsafe(),
             // @checkpoint:gnosis:begin — managed by `./gradlew refreshCheckpoint`
-            // trusted checkpoint: recent finalized gnosis block root (slot 31321840, 2026-11-25, period 3823)
-            Bytes.fromHexString("61302d86b55c9056cf7b28c02e8d22dfd19e55e35f0b6b03c8432d98b2a78a05").toArrayUnsafe(),
-            31321840L, // checkpoint slot (epoch = slot/16). Must stay in sync with the root above.
+            // trusted checkpoint: recent finalized gnosis block root (slot 31336704, 2026-11-26, period 3825)
+            Bytes.fromHexString("fec8e1e8f4855485416b2592097801b71a04373dd87fa11ee5cb49ea031ccf15").toArrayUnsafe(),
+            31336704L, // checkpoint slot (epoch = slot/16). Must stay in sync with the root above.
             // @checkpoint:gnosis:end
             // Fork schedule — gnosischain/configs mainnet/config.yaml *_FORK_EPOCH /
             // *_FORK_VERSION, on 16-slot epochs. Fulu (0x06000064) active since epoch
@@ -673,9 +673,9 @@ public record NetworkConfig(
             // genesis_validators_root (Chiado beacon chain)
             Bytes.fromHexString("9d642dac73058fbf39c0ae41ab1e34e4d889043cb199851ded7095bc99eb4c1e").toArrayUnsafe(),
             // @checkpoint:chiado:begin — managed by `./gradlew refreshCheckpoint`
-            // trusted checkpoint: recent finalized chiado block root (slot 25676976, 2026-11-04, period 3134)
-            Bytes.fromHexString("47112fb5b2304eb748bcb893e4c3ad93cdca690737d874b4aa08656306e8c4f1").toArrayUnsafe(),
-            25676976L, // checkpoint slot (epoch = slot/16). Must stay in sync with the root above.
+            // trusted checkpoint: recent finalized chiado block root (slot 26056176, 2026-11-26, period 3180)
+            Bytes.fromHexString("1e547491c1b4e20474d0d98e71b8a469e4fbbef562f3aa148c183c3fe6c92285").toArrayUnsafe(),
+            26056176L, // checkpoint slot (epoch = slot/16). Must stay in sync with the root above.
             // @checkpoint:chiado:end
             // Fork schedule — gnosischain/configs chiado/config.yaml *_FORK_EPOCH /
             // *_FORK_VERSION, on 16-slot epochs (the live beacon API serves the same
