@@ -26,9 +26,11 @@
 # $FIRST_WAVE_MINUTES (default 120) of wall-clock time have passed it lets the
 # jobs go anyway. The cap keeps a held build inside `verify release`'s
 # four-hour wait (a held MyotisKit build takes up to 90 minutes). A listing that
-# fails or takes over 60 s is asked again. Only runs created with this tag push
-# count (not before this run's own creation, less two minutes), so a tag pushed
-# again at the same commit is not answered by its earlier runs. The first
+# fails or takes over 60 s is asked again, and so is reading this run's own
+# creation time (five tries; then it lets the jobs go, and says so). Only runs
+# created with this tag push count (not before this run's own creation, less
+# two minutes), so a tag pushed again at the same commit is not answered by its
+# earlier runs. The first
 # wave's runs are created with the tag push, as this one is; a name not listed
 # within 5 minutes is taken as not coming, and said once. The workflows also
 # run the held jobs when this job fails (`!cancelled()`), and its steps are
@@ -46,7 +48,13 @@ deadline=$((SECONDS + limit * 60))
 
 # This run's creation, in epoch seconds: the runs of the same push are created
 # within moments of it.
-own=$(timeout 60 gh api "repos/$GH_REPO/actions/runs/$GITHUB_RUN_ID" --jq '.created_at | fromdateiso8601')
+own=""
+for attempt in 1 2 3 4 5; do
+  own=$(timeout 60 gh api "repos/$GH_REPO/actions/runs/$GITHUB_RUN_ID" --jq '.created_at | fromdateiso8601') && break
+  own=""
+  sleep 15
+done
+[ -n "$own" ] || { echo "::warning::could not read this run's creation time: not waiting for the first wave of $tag"; exit 0; }
 since=$((own - 120))
 
 declare -A warned=()
