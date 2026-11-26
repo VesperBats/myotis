@@ -40,6 +40,11 @@ pub(crate) const K: u64 = CheckpointTable::K;
 /// starts with it with the permanent `-32602`, not the retryable `-32000`.
 pub const ALARM_PREFIX: &str = "checkpoint table alarm:";
 
+/// The words of a deep read's refusal below the table's floor (`checkpoints::first_served`):
+/// a Gnosis Chain block from before its merge, whose AuRa-sealed header this engine does not
+/// decode. Lasting, like [`super::reader::BEYOND_FINALIZED_WINDOW`]: no retry changes it.
+pub const BEFORE_THE_FLOOR: &str = "is from before the merge: its AuRa-sealed header is not decoded by this engine";
+
 /// What [`DeepAnchors::record_window_under`] did with a window.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Recorded {
@@ -157,6 +162,12 @@ impl DeepAnchors {
     /// The alarm's message, once raised.
     pub(crate) fn alarm(&self) -> Option<String> {
         self.state.lock().ok().and_then(|s| s.alarm.clone())
+    }
+
+    /// Whether `n` is below the table's floor: a deep read there is refused with
+    /// [`BEFORE_THE_FLOOR`]. False without a table (today's refusal stands).
+    pub(crate) fn below_floor(&self, n: u64) -> bool {
+        self.table.is_some() && n < self.floor
     }
 
     /// What a read at `n` needs, given the attested finalized block `fin` (`n <= fin.0`).
@@ -559,9 +570,18 @@ mod tests {
     #[test]
     fn gnosis_blocks_before_the_merge_keep_the_refusal() {
         use myotis_core::checkpoints::GNOSIS_LAST_AURA_BLOCK;
+        use myotis_core::header::{self, BlockHeader};
+        // Both sides of the boundary, recorded: the last AuRa header does not decode, the
+        // first one after the merge does, and its parent is that AuRa block.
         let aura: &[u8] = include_bytes!("../../../testdata/el/gnosis-deep/gnosis-25349536.header.rlp");
-        assert!(myotis_core::header::BlockHeader::decode(aura).is_err(), "an AuRa header");
+        let merged: &[u8] = include_bytes!("../../../testdata/el/gnosis-deep/gnosis-25349537.header.rlp");
+        assert!(BlockHeader::decode(aura).is_err(), "an AuRa header");
+        let first = BlockHeader::decode(merged).expect("the first header after the merge decodes");
+        assert_eq!(first.number, GNOSIS_LAST_AURA_BLOCK + 1);
+        assert_eq!(first.parent_hash, header::hash(aura));
         let d = DeepAnchors::for_chain(100, None);
+        assert!(d.below_floor(GNOSIS_LAST_AURA_BLOCK) && !d.below_floor(GNOSIS_LAST_AURA_BLOCK + 1));
+        assert!(!DeepAnchors::for_chain(1, None).below_floor(0));
         let fin = (49_000_000, h(49_000_000));
         assert_eq!(d.plan(GNOSIS_LAST_AURA_BLOCK, fin), None);
         assert_eq!(d.plan(1, fin), None);

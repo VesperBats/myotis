@@ -8309,6 +8309,14 @@ impl ElReader {
         let WindowTop::Finalized { .. } = top else {
             return Err(beyond());
         };
+        // Below the table's floor (Gnosis Chain before its merge): a refusal of its own,
+        // lasting like `beyond`, that names the cause.
+        if self.deep.below_floor(target_num) {
+            return Err(PoolReadError::Fatal(format!(
+                "block {target_num} {}",
+                super::deep::BEFORE_THE_FLOOR
+            )));
+        }
         // A re-anchor (STALE_ANCHOR) voids what was linked under the old anchor. The hook
         // drops it when the anchor moves; this catches a reader built after one.
         let under = self.anchor.reanchors();
@@ -10911,7 +10919,8 @@ fn build_one_receipt(
 
 /// The words of a block read's refusal when the block is below the window of the
 /// finalized block and no deep anchor serves it (no table for this network): lasting, no
-/// retry changes it. A read above finality more than 512 blocks below the head (a long
+/// retry changes it. A block below the table's floor has words of its own
+/// ([`super::deep::BEFORE_THE_FLOOR`]), lasting too. A read above finality more than 512 blocks below the head (a long
 /// stretch without finality) words its top "the optimistic head" instead and is transient.
 pub const BEYOND_FINALIZED_WINDOW: &str = "behind the finalized block — beyond the 512-block verify window";
 

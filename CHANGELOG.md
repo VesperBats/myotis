@@ -28,7 +28,8 @@ its trust anchors and release checks.
   the merge (block 25,349,537 on). The table is the hash of every 1024th block
   from genesis to block 49,469,393, about 1.55 MB in every app that embeds the
   Rust engine; its top is a beacon-attested finalized block. A block from
-  before the merge (an AuRa header) is still refused, as before.
+  before the merge (an AuRa header) is still refused, now in words that say
+  so (#934).
 
 ## [0.1.24] - 2026-11-25
 

@@ -15,9 +15,11 @@
 //!
 //! Why the pin covers every entry and the top: the build linked every header by `parentHash`
 //! from the top down to the genesis hash, so all entries lie on one hash chain between those
-//! two ends. An entry off that chain would break the walk. The top was cross-checked against
-//! a second client, and the running node's gap walk checks it once more (the rule). The pin
-//! then proves these are the bytes of that build.
+//! two ends. An entry off that chain would break the walk. What the top rests on differs per
+//! table: mainnet's was cross-checked against a second client; Gnosis Chain's is a finalized
+//! block the light client attested, with no second execution client (its pin says which, and
+//! the rule's text for it awaits the owner's sign-off). The running node's gap walk checks
+//! either once more (the rule). The pin then proves these are the bytes of that build.
 //!
 //! Sans-I/O like the rest of this crate: [`mainnet`] and [`gnosis`] read `include_bytes!` data
 //! only. [`CheckpointTable::parse`] hashes the whole table (0.83 MB on mainnet, 1.55 MB on
@@ -190,10 +192,11 @@ pub fn mainnet() -> Result<CheckpointTable<'static>, CoreError> {
 /// (eth2swarm at `4936aea`, which hashes the AuRa-sealed headers before the merge) from the
 /// owner's Gnosis Erigon 3.8.1 archive node, every header hashed and linked by `parentHash`
 /// down to the genesis hash. The top is the finalized block of Myotis's Gnosis light client
-/// (`myotis-rpcd --network gnosis`), a sync-committee-attested hash passed as `--top-hash`;
-/// the source node's own finalized block was the same block with the same hash. No second
-/// Gnosis execution client was at hand for the 200-entry cross-check mainnet's builds ran.
-/// The sidecar `gnosis-1024.hashes.json` records the same.
+/// (`myotis-rpcd --network gnosis`, Myotis `ae4dcd2d`), a sync-committee-attested hash passed
+/// as `--top-hash`: the execution payload of beacon block 31,331,072, a finalized checkpoint.
+/// No second Gnosis execution client was at hand for the 200-entry cross-check mainnet's
+/// builds ran. `checkpoints/README.md` records the evidence; the sidecar names only
+/// `--top-hash`.
 pub const GNOSIS_PIN: TablePin = TablePin {
     keccak256: hex32("af23cdadb52bd536eccc8fc73c5af7a50c26d5c7152ddf4833f3db0d22de45eb"),
     entries: 48_310,

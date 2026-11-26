@@ -349,7 +349,7 @@ transaction (`rust/myotis-net/src/el/send_check.rs`; Java: `SendCheck`).
   claim Myotis does make is narrower: the logs of watched addresses over the log index's
   walked coverage (§12).
 - **Old data.** State is served at the head and the finalized block only; blocks up to 512
-  back, deeper on the Rust engine on mainnet through the bundled checkpoint table (a trust
+  back, deeper on the Rust engine on mainnet and Gnosis Chain (after its merge) through the bundled checkpoint table (a trust
   anchor of its own: `.claude/agent/data-sources.md`, Trust); the header walk under 8192
   blocks. The historical accumulators that would extend this further (pre-Merge epoch
   accumulator, `historical_summaries`) are designed but **not built**

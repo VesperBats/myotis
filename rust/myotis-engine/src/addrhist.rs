@@ -598,7 +598,8 @@ pub fn verify_json(
                 // A lasting refusal (outside what this node can verify, the checkpoint
                 // table's alarm) is no "ask again".
                 let lasting = e.starts_with(myotis_net::el::deep::ALARM_PREFIX)
-                    || e.contains(myotis_net::el::reader::BEYOND_FINALIZED_WINDOW);
+                    || e.contains(myotis_net::el::reader::BEYOND_FINALIZED_WINDOW)
+                    || e.contains(myotis_net::el::deep::BEFORE_THE_FLOOR);
                 for i in idx {
                     let (_, slot, roles) = entries[i];
                     out[i] = if lasting {
