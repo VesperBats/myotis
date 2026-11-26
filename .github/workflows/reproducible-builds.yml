@@ -135,6 +135,8 @@ jobs:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-26.04
     timeout-minutes: 140
+    # A failed wait (a set-up error, a lost runner) does not turn the run red.
+    continue-on-error: true
     permissions:
       contents: read
       # To see when the tag's first-wave runs are done.
