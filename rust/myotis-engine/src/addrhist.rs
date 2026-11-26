@@ -106,9 +106,6 @@ pub fn parse_config(json: &str) -> Result<Config, String> {
             return Err(format!("unknown setting '{k}'"));
         }
     }
-    if obj.contains_key("importer") && obj.contains_key("importers") {
-        return Err("give either 'importer' (one key for every chain) or 'importers' (a key per chain), not both".into());
-    }
     let importers = match (obj.get("importer"), obj.get("importers")) {
         (None | Some(serde_json::Value::Null), None) => Importers::None,
         (Some(serde_json::Value::String(s)), None) => {
@@ -129,7 +126,9 @@ pub fn parse_config(json: &str) -> Result<Config, String> {
             Importers::PerChain(keys)
         }
         (None, Some(_)) => return Err("importers must be an object of chain id to importer address".into()),
-        (Some(_), Some(_)) => unreachable!("refused above"),
+        (Some(_), Some(_)) => {
+            return Err("give either 'importer' (one key for every chain) or 'importers' (a key per chain), not both".into())
+        }
     };
     let network = match obj.get("swarm") {
         None | Some(serde_json::Value::Null) => Network::Mainnet,
@@ -377,7 +376,9 @@ pub fn history_json(
         Ok(o) => o,
         Err(msg) => return eljson::invalid_params_json(&msg),
     };
-    let importer = cfg.importers.for_chain(chain_id).expect("refusal() checked it");
+    let Some(importer) = cfg.importers.for_chain(chain_id) else {
+        return eljson::invalid_params_json("no importer key is set for the address history on this chain");
+    };
     match reader::page(rt, &cfg, chain_id, importer, &address, &opts) {
         Ok(read) => page_json(&read, importer, chain_head, (chain_id, address), trust, &opts),
         Err(reader::Failure::Refused(msg)) => eljson::invalid_params_json(&msg),

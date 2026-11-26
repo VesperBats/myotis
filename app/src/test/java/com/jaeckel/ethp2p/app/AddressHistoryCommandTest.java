@@ -78,5 +78,10 @@ class AddressHistoryCommandTest {
                 Main.trustedImporters("{\"importer\":null}"));
         assertEquals(java.util.List.of("trusting no importer (every read refused)"),
                 Main.trustedImporters("{\"importers\":{}}"));
+        // What the patterns cannot read is shown as written, never as "no importer".
+        assertEquals(java.util.List.of("trusting per chain the importers {\"\\u0031\": \"" + a + "\"}"),
+                Main.trustedImporters("{\"importers\": {\"\\u0031\": \"" + a + "\"}}"));
+        assertEquals(java.util.List.of("trusting on every chain the importer the settings name"),
+                Main.trustedImporters("{\"importer\": \"\\u0030x" + a.substring(2) + "\"}"));
     }
 }

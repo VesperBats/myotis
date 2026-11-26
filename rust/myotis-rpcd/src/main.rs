@@ -193,6 +193,16 @@ fn trusted_importers(json: &str) -> Vec<String> {
     }
 }
 
+/// Whether the address history settings `json` name importers per chain but none for
+/// `chain_id` (every read on it refused). `"importer"` covers every chain; its `null` is
+/// already logged as such.
+fn lacks_chain(json: &str, chain_id: u64) -> bool {
+    serde_json::from_str::<serde_json::Value>(json)
+        .ok()
+        .and_then(|v| v.get("importers").and_then(|m| m.as_object()).map(|m| !m.contains_key(&chain_id.to_string())))
+        .unwrap_or(false)
+}
+
 fn run(args: Args) -> Result<(), String> {
     // ABI handshake (also installs the engine's log ring). The engine is linked
     // statically, so a mismatch means a broken build, not a stale library.
@@ -203,9 +213,11 @@ fn run(args: Args) -> Result<(), String> {
             myotis_engine::ABI_VERSION
         ));
     }
+    let mut history_settings = None;
     if let Some(p) = &args.address_history_config {
         let s = std::fs::read_to_string(p).map_err(|e| format!("{}: {e}", p.display()))?;
         let trusted = trusted_importers(&s);
+        history_settings = Some(s.clone());
         let answer = ffi::set_address_history_config_json(s);
         if answer.trim() != "{}" {
             return Err(format!("{}: the address history settings were refused: {answer}", p.display()));
@@ -222,6 +234,9 @@ fn run(args: Args) -> Result<(), String> {
     let network = ffi::canonical_network_name(args.network.clone())
         .ok_or_else(|| format!("unknown network '{}'", args.network))?;
     let chain_id = chain_id_of(&network)?;
+    if history_settings.as_deref().is_some_and(|s| lacks_chain(s, chain_id)) {
+        eprintln!("address history: no importer key for chain {chain_id} (this daemon's network): its history reads are refused");
+    }
     let listen_ports = args.listen_ports();
     let listen = match args.listen {
         Some(addr) => addr,
@@ -634,6 +649,10 @@ mod tests {
         assert_eq!(trusted_importers(&format!(r#"{{"importer":"{a}"}}"#)), [format!("trusting on every chain the index of importer {a}")]);
         assert_eq!(trusted_importers(r#"{"importer":null}"#), ["trusting no importer (every read refused)"]);
         assert_eq!(trusted_importers(r#"{"importers":{}}"#), ["trusting no importer (every read refused)"]);
+        // A map without this daemon's own chain is said at start, not only at the first read.
+        let map = format!(r#"{{"importers":{{"1":"{a}"}}}}"#);
+        assert!(lacks_chain(&map, 100) && !lacks_chain(&map, 1));
+        assert!(!lacks_chain(&format!(r#"{{"importer":"{a}"}}"#), 100));
     }
 
     #[test]

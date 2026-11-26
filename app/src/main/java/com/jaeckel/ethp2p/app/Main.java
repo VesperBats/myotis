@@ -350,10 +350,20 @@ public final class Main {
             while (e.find()) chains.put(new java.math.BigInteger(e.group(1)), e.group(2));
             chains.forEach((chain, key) ->
                     lines.add("trusting on chain " + chain + " the index of importer " + key));
+            // An entry these patterns do not read (a JSON escape, say) is never dropped
+            // silently: the engine applied it, so the line shows the map as written.
+            String rest = e.replaceAll("").replaceAll("[\\s,]", "");
+            if (!rest.isEmpty()) {
+                lines.clear();
+                lines.add("trusting per chain the importers {" + map.group(1).trim() + "}");
+            }
         } else {
             java.util.regex.Matcher m = java.util.regex.Pattern
-                    .compile("\"importer\"\\s*:\\s*\"(0[xX][0-9a-fA-F]{40})\"").matcher(json);
-            if (m.find()) lines.add("trusting on every chain the index of importer " + m.group(1));
+                    .compile("\"importer\"\\s*:\\s*(\"(0[xX][0-9a-fA-F]{40})\"|null)?").matcher(json);
+            if (m.find()) {
+                if (m.group(2) != null) lines.add("trusting on every chain the index of importer " + m.group(2));
+                else if (m.group(1) == null) lines.add("trusting on every chain the importer the settings name");
+            }
         }
         if (lines.isEmpty()) lines.add("trusting no importer (every read refused)");
         return lines;
