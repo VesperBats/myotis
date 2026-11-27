@@ -342,6 +342,20 @@ question does not rest on memory.
      summary and pass on to the owner whether the unsigned APK and the AAR
      are identical, and what differs if not.
 
+   **The macOS runners go to the first wave** (owner's request, 2026-11-26:
+   "Build android and macos first. I am not waiting for the rest."). On a tag
+   push, `Engine library` (the Maven set the hosts resolve, the iOS module
+   among it) and `Desktop DMG (macOS)` take the account's few macOS runners
+   first: the builds of MyotisKit (`ios-framework.yml`), `ios-xcframework.yml`
+   and `node-binding.yml` (its Linux and Windows legs with the macOS ones: one
+   matrix job), and the macOS legs of `reproducible builds`, each wait in a
+   `first-wave` job on Linux (`.github/tag-first-wave.sh`) until those two
+   runs have finished, whatever their outcome, and never more than two
+   hours (the cap keeps the held builds inside `verify release`'s four-hour
+   wait). A failed wait holds nothing back. The Android APK and every other
+   job are not held. Both evidence runs above finish later for it, as the
+   held jobs do.
+
    Report a red run to the owner at once, with what failed. Neither is fixed
    by moving or re-pushing the tag: a publisher that failed is re-run (every
    upload is idempotent), `verify release` is then dispatched for the tag, and

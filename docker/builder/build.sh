@@ -5,9 +5,10 @@
 #
 # Passes the Dockerfile its build args: the image-only pins from pins.env, and
 # the versions the build itself pins, each read from its ONE source (see
-# pins.env's header). A JDK version in .java-version that pins.env has no hash
-# for, or a compileSdk the image does not carry, fails here rather than
-# producing an image that is not the one the build expects.
+# pins.env's header). A JDK release in .java-version (version and build, e.g.
+# 21.0.13+9) that pins.env has no hash for, or a compileSdk the image does not
+# carry, fails here rather than producing an image that is not the one the
+# build expects.
 #
 # `--print-args` prints the resolved build args and exits (what check.sh and
 # the workflow compare the finished image against). `--print-key` prints the
@@ -37,8 +38,8 @@ for name in jdk rust ndk build_tools cargo_ndk go; do
     [[ -n "${!name}" ]] || { echo "build.sh: could not read the $name pin" >&2; exit 1; }
 done
 
-[[ "$jdk" == "$JDK_VERSION" ]] || {
-    echo "build.sh: .java-version says $jdk, but docker/builder/pins.env has the build number and hash of $JDK_VERSION." >&2
+[[ "$jdk" == "$JDK_VERSION+$JDK_BUILD" ]] || {
+    echo "build.sh: .java-version says $jdk, but docker/builder/pins.env has the hash of $JDK_VERSION+$JDK_BUILD." >&2
     echo "          Move JDK_VERSION, JDK_BUILD and JDK_SHA256 there in the same change." >&2
     exit 1
 }

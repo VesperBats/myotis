@@ -28,7 +28,42 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # On a v* tag push, the macOS jobs below wait for the tag's first wave (the
+  # engine library and the desktop dmgs), which get the account's few macOS
+  # runners first (owner's request, 2026-11-26; .github/tag-first-wave.sh).
+  # Only a tag push waits. The held jobs also start if this job fails
+  # (`!cancelled()`), and past its cap (120 minutes) it lets them go.
+  first-wave:
+    name: Wait for the tag's first wave
+    # Only a tag push waits; on every other event the held jobs start at once.
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-26.04
+    timeout-minutes: 140
+    # A failed wait (a set-up error, a lost runner) does not turn the run red.
+    continue-on-error: true
+    permissions:
+      contents: read
+      # To see when the tag's first-wave runs are done.
+      actions: read
+    steps:
+      - name: Checkout
+        continue-on-error: true
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/tag-first-wave.sh
+          sparse-checkout-cone-mode: false
+      - name: Wait for the engine library and the desktop dmgs
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: .github/tag-first-wave.sh
+
   build:
+    needs: first-wave
+    # Not held back by a failed wait (.github/tag-first-wave.sh).
+    if: ${{ !cancelled() }}
     strategy:
       fail-fast: false
       matrix:
@@ -129,7 +164,12 @@ jobs:
     # the manual republish path — the job is idempotent (--clobber uploads,
     # marker-guarded notes append), and the smoke jobs below exclude tag refs
     # so a republish never drags the 100-minute smokes along.
-    if: startsWith(github.ref, 'refs/tags/v')
+    # The results are spelled out: the implicit success() would also look at
+    # `first-wave` behind `build`, skipped off a tag push (a dispatch on a tag,
+    # the republish path) or failed, and skip the publish with a green run.
+    if: >-
+      ${{ !cancelled() && startsWith(github.ref, 'refs/tags/v')
+          && needs.build.result == 'success' && needs.version-guard.result == 'success' }}
     runs-on: ubuntu-26.04
     permissions:
       # gh release create/upload/edit needs write access to Releases.
@@ -225,7 +265,8 @@ jobs:
   smoke-linux:
     # Tag refs excluded: dispatching on a tag is the release-republish path
     # and must not launch the smokes alongside it.
-    if: github.event_name == 'workflow_dispatch' && !startsWith(github.ref, 'refs/tags/')
+    # Spelled out: `first-wave`, behind `build`, is always skipped on a dispatch.
+    if: ${{ !cancelled() && needs.build.result == 'success' && github.event_name == 'workflow_dispatch' && !startsWith(github.ref, 'refs/tags/') }}
     needs: build
     permissions:
       contents: read
@@ -268,7 +309,8 @@ jobs:
   # seconds. Manual-only — see the smoke-linux comment.
   smoke-windows:
     # Tag refs excluded — see smoke-linux.
-    if: github.event_name == 'workflow_dispatch' && !startsWith(github.ref, 'refs/tags/')
+    # Spelled out: `first-wave`, behind `build`, is always skipped on a dispatch.
+    if: ${{ !cancelled() && needs.build.result == 'success' && github.event_name == 'workflow_dispatch' && !startsWith(github.ref, 'refs/tags/') }}
     needs: build
     permissions:
       contents: read
